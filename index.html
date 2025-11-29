@@ -2,464 +2,295 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>AR Table with Clickable Drawer</title>
+  <title>AR Table With Drawer & Wood Texture</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      font-family: system-ui, sans-serif;
-      background: #000;
-    }
-
+    body { margin: 0; overflow: hidden; font-family: system-ui; background: #000; }
     #ui-panel {
-      position: absolute;
-      top: 10px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.6);
-      color: #fff;
-      padding: 8px 12px;
-      border-radius: 8px;
-      font-size: 12px;
-      z-index: 2;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      align-items: center;
-      justify-content: center;
+      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.6); color: #fff;
+      padding: 8px 12px; border-radius: 8px; font-size: 12px;
+      z-index: 2; display: flex; flex-wrap: wrap; gap: 6px;
+      align-items: center; justify-content: center;
     }
-
-    #ui-panel label {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
+    #ui-panel label { display: flex; align-items: center; gap: 4px; }
     #ui-panel input {
-      width: 50px;
-      padding: 2px 4px;
-      border-radius: 4px;
-      border: 1px solid #555;
-      font-size: 12px;
+      width: 50px; padding: 2px 4px; border-radius: 4px;
+      border: 1px solid #555; font-size: 12px;
     }
-
-    #info {
-      width: 100%;
-      text-align: center;
-      margin-top: 4px;
-      font-size: 11px;
-      opacity: 0.85;
-    }
+    #info { width: 100%; text-align: center; margin-top: 4px; font-size: 11px; opacity: .85; }
   </style>
 </head>
 <body>
   <div id="ui-panel">
-    <label>W:
-      <input id="tableWidth" type="number" step="0.01" value="1.0" />
-    </label>
-    <label>H:
-      <input id="tableHeight" type="number" step="0.01" value="0.75" />
-    </label>
-    <label>D:
-      <input id="tableDepth" type="number" step="0.01" value="0.6" />
-    </label>
-    <div id="info">
-      1️⃣ First tap in AR: place table · 1 finger drag: move · 2 fingers: rotate · Short tap on table: open/close drawer · Units: meters
-    </div>
+    <label>W:<input id="tableWidth" type="number" step="0.01" value="1.0"></label>
+    <label>H:<input id="tableHeight" type="number" step="0.01" value="0.75"></label>
+    <label>D:<input id="tableDepth" type="number" step="0.01" value="0.6"></label>
+    <div id="info">Tap to place · 1 finger = move · 2 fingers = rotate · Tap table = open/close drawer</div>
   </div>
 
   <script type="module">
     import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
     import { ARButton } from 'https://unpkg.com/three@0.161.0/examples/jsm/webxr/ARButton.js';
 
-    let camera, scene, renderer;
-    let controller;
-    let reticle;
-    let hitTestSource = null;
-    let hitTestSourceRequested = false;
+    let camera, scene, renderer, controller, reticle;
+    let table = null, drawerGroup = null;
+    let drawerOpen = false, drawerOpenZ = 0, drawerClosedZ = 0;
 
-    const widthInput  = document.getElementById('tableWidth');
-    const heightInput = document.getElementById('tableHeight');
-    const depthInput  = document.getElementById('tableDepth');
-
-    // Single table group
-    let table = null;
-
-    // Drawer
-    let drawerGroup   = null;
-    let drawerOpen    = false;
-    let drawerClosedZ = 0;
-    let drawerOpenZ   = 0;
-
-    // Dragging (move table on floor)
-    const dragPlane   = new THREE.Plane();
-    const raycaster   = new THREE.Raycaster();
-    const dragPoint   = new THREE.Vector3();
-    const dragOffset  = new THREE.Vector3();
-    let isMoving      = false;
-
-    // Rotation (2-finger twist)
-    let isRotating   = false;
-    let initialAngle = 0;
-    let initialRotY  = 0;
+    let hitTestSource = null, hitTestSourceRequested = false;
+    const raycaster = new THREE.Raycaster();
+    const dragPlane = new THREE.Plane();
+    const dragPoint = new THREE.Vector3();
+    const dragOffset = new THREE.Vector3();
+    let isMoving = false, isRotating = false;
 
     // Tap detection
-    let potentialTap   = false;
-    let tapStartX      = 0;
-    let tapStartY      = 0;
-    let tapStartTime   = 0;
-    let lastTouchX     = 0;
-    let lastTouchY     = 0;
-    const TAP_MAX_MOV  = 10;   // pixels
-    const TAP_MAX_TIME = 250;  // ms
+    let potentialTap = false, tapStartX = 0, tapStartY = 0, tapStartTime = 0;
+    let lastTouchX = 0, lastTouchY = 0;
+    const TAP_MAX_MOV = 10, TAP_MAX_TIME = 250;
+
+    const widthInput = document.getElementById('tableWidth');
+    const heightInput = document.getElementById('tableHeight');
+    const depthInput = document.getElementById('tableDepth');
+
+    // -------------- LOAD WOOD TEXTURE --------------------
+    const woodTextureURL =
+      "https://raw.githubusercontent.com/ChatGPTAssets/Textures/main/wood/planks.jpg";
+    const textureLoader = new THREE.TextureLoader();
+    const woodTex = textureLoader.load(woodTextureURL);
+    woodTex.wrapS = woodTex.wrapT = THREE.RepeatWrapping;
+    woodTex.repeat.set(2, 2);
+
+    //-----------------------------------------------------
 
     init();
     animate();
 
     function init() {
-      // Scene & camera
       scene = new THREE.Scene();
-      camera = new THREE.PerspectiveCamera(
-        70,
-        window.innerWidth / window.innerHeight,
-        0.01,
-        20
-      );
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
 
-      // Light
-      const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.0);
-      scene.add(light);
-
-      // Renderer
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-      renderer.setPixelRatio(window.devicePixelRatio);
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      // AR Button
-      const arButton = ARButton.createButton(renderer, {
-        requiredFeatures: ['hit-test']
-      });
+      const arButton = ARButton.createButton(renderer, { requiredFeatures: ["hit-test"] });
       document.body.appendChild(arButton);
 
       // Reticle
-      const ringGeo = new THREE.RingGeometry(0.06, 0.08, 32).rotateX(-Math.PI / 2);
-      const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-      reticle = new THREE.Mesh(ringGeo, ringMat);
-      reticle.matrixAutoUpdate = false;
+      const ringGeo = new THREE.RingGeometry(0.06, 0.08, 32).rotateX(-Math.PI/2);
+      reticle = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
       reticle.visible = false;
       scene.add(reticle);
 
-      // AR controller select: ONLY used to place table the first time
       controller = renderer.xr.getController(0);
-      controller.addEventListener('select', onSelect);
+      controller.addEventListener("select", onSelect);
       scene.add(controller);
 
-      // Touch gestures
-      window.addEventListener('touchstart', onTouchStart, { passive: false });
-      window.addEventListener('touchmove',  onTouchMove,  { passive: false });
-      window.addEventListener('touchend',   onTouchEnd,   { passive: false });
-      window.addEventListener('touchcancel', onTouchEnd,  { passive: false });
+      window.addEventListener("touchstart", onTouchStart, { passive: false });
+      window.addEventListener("touchmove", onTouchMove, { passive: false });
+      window.addEventListener("touchend", onTouchEnd, { passive: false });
 
-      window.addEventListener('resize', onWindowResize, false);
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
     }
 
-    function onWindowResize() {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+    function getDims() {
+      return {
+        w: parseFloat(widthInput.value),
+        h: parseFloat(heightInput.value),
+        d: parseFloat(depthInput.value)
+      };
     }
 
-    function getTableDimensions() {
-      let w = parseFloat(widthInput.value);
-      let h = parseFloat(heightInput.value);
-      let d = parseFloat(depthInput.value);
-
-      if (!w || w <= 0) w = 1.0;
-      if (!h || h <= 0) h = 0.75;
-      if (!d || d <= 0) d = 0.6;
-
-      return { w, h, d };
-    }
-
-    // Build table with top, legs, and drawer
-    // Origin: bottom center
     function createTable(w, h, d) {
       const group = new THREE.Group();
+      const topT = Math.max(0.03, h*0.05);
+      const legH = h - topT;
+      const legT = Math.max(0.03, Math.min(w,d)*0.07);
 
-      const topThickness = Math.max(0.03, h * 0.05);
-      const legHeight    = Math.max(0.1, h - topThickness);
-      const legThickness = Math.max(0.03, Math.min(w, d) * 0.07);
+      const woodMat = new THREE.MeshStandardMaterial({ map: woodTex });
 
-      // Table top
-      const topGeo = new THREE.BoxGeometry(w, topThickness, d);
-      const topMat = new THREE.MeshStandardMaterial({ color: 0x804000 });
-      const top    = new THREE.Mesh(topGeo, topMat);
-      top.position.set(0, legHeight + topThickness / 2, 0);
+      // Top
+      const top = new THREE.Mesh(
+        new THREE.BoxGeometry(w, topT, d),
+        woodMat
+      );
+      top.position.set(0, legH + topT/2, 0);
       group.add(top);
 
       // Legs
-      const legGeo = new THREE.BoxGeometry(legThickness, legHeight, legThickness);
-      const legMat = new THREE.MeshStandardMaterial({ color: 0x402000 });
-
-      const xOffset = w / 2 - legThickness / 2;
-      const zOffset = d / 2 - legThickness / 2;
+      const legGeo = new THREE.BoxGeometry(legT, legH, legT);
       const legPositions = [
-        [ xOffset, legHeight / 2,  zOffset],
-        [-xOffset, legHeight / 2,  zOffset],
-        [ xOffset, legHeight / 2, -zOffset],
-        [-xOffset, legHeight / 2, -zOffset]
+        [ w/2-legT/2, legH/2,  d/2-legT/2],
+        [-w/2+legT/2, legH/2,  d/2-legT/2],
+        [ w/2-legT/2, legH/2, -d/2+legT/2],
+        [-w/2+legT/2, legH/2, -d/2+legT/2]
       ];
-
-      for (const [x, y, z] of legPositions) {
-        const leg = new THREE.Mesh(legGeo, legMat);
-        leg.position.set(x, y, z);
+      legPositions.forEach(([x,y,z])=>{
+        const leg = new THREE.Mesh(legGeo, woodMat);
+        leg.position.set(x,y,z);
         group.add(leg);
-      }
+      });
 
-      // Drawer group
+      // Drawer
       const drawer = new THREE.Group();
+      const dw = w*0.6, dh = Math.min(legH*0.4, 0.2), dd = d*0.5;
 
-      const drawerWidth  = w * 0.6;
-      const drawerHeight = Math.min(legHeight * 0.4, 0.2);
-      const drawerDepth  = d * 0.5;
-
-      // Drawer body
-      const drawerBodyGeo = new THREE.BoxGeometry(drawerWidth, drawerHeight, drawerDepth);
-      const drawerBodyMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
-      const drawerBody    = new THREE.Mesh(drawerBodyGeo, drawerBodyMat);
+      const drawerBody = new THREE.Mesh(
+        new THREE.BoxGeometry(dw, dh, dd),
+        new THREE.MeshStandardMaterial({ map: woodTex })
+      );
       drawer.add(drawerBody);
 
-      // Front panel
-      const frontThickness = drawerDepth * 0.2;
-      const frontGeo = new THREE.BoxGeometry(
-        drawerWidth * 1.02,
-        drawerHeight * 1.02,
-        frontThickness
+      const front = new THREE.Mesh(
+        new THREE.BoxGeometry(dw*1.02, dh*1.02, dd*0.2),
+        new THREE.MeshStandardMaterial({ map: woodTex })
       );
-      const frontMat = new THREE.MeshStandardMaterial({ color: 0x666666 });
-      const front    = new THREE.Mesh(frontGeo, frontMat);
-      front.position.z = drawerDepth / 2 + frontThickness / 2;
+      front.position.z = dd/2 + (dd*0.2)/2;
       drawer.add(front);
 
-      // Handle
-      const handleGeo = new THREE.BoxGeometry(
-        drawerWidth * 0.3,
-        drawerHeight * 0.1,
-        frontThickness * 0.3
+      const handle = new THREE.Mesh(
+        new THREE.BoxGeometry(dw*0.3, dh*0.1, dd*0.08),
+        new THREE.MeshStandardMaterial({ color: 0xdddddd })
       );
-      const handleMat = new THREE.MeshStandardMaterial({ color: 0xdddddd });
-      const handle    = new THREE.Mesh(handleGeo, handleMat);
-      handle.position.set(0, 0, front.position.z + frontThickness * 0.4);
+      handle.position.set(0,0,front.position.z + 0.04);
       drawer.add(handle);
 
-      // Drawer local position (front side +Z)
-      const drawerY = legHeight * 0.6;
-      const drawerZ = d / 2 - drawerDepth / 2 - 0.02;
-      drawer.position.set(0, drawerY, drawerZ);
+      const drawerY = legH*0.6;
+      const drawerZ = d/2 - dd/2 - 0.02;
 
+      drawer.position.set(0, drawerY, drawerZ);
       group.add(drawer);
 
-      // Store drawer info in userData (local z)
-      group.userData.drawerGroup   = drawer;
+      group.userData.drawerGroup = drawer;
       group.userData.drawerClosedZ = drawerZ;
-      group.userData.drawerOpenZ   = drawerZ + drawerDepth * 0.6;
+      group.userData.drawerOpenZ = drawerZ + dd*0.6;
 
       return group;
     }
 
-    // AR controller select: only place table first time
     function onSelect() {
       if (!reticle.visible) return;
-      if (table) return; // already created; don't re-place on every tap
+      if (table) return;
 
-      const { w, h, d } = getTableDimensions();
-
+      const { w, h, d } = getDims();
       table = createTable(w, h, d);
       scene.add(table);
 
       table.position.setFromMatrixPosition(reticle.matrix);
       table.quaternion.setFromRotationMatrix(reticle.matrix);
 
-      // Drawer setup
-      drawerGroup   = table.userData.drawerGroup;
+      drawerGroup = table.userData.drawerGroup;
       drawerClosedZ = table.userData.drawerClosedZ;
-      drawerOpenZ   = table.userData.drawerOpenZ;
-      drawerOpen    = false;
+      drawerOpenZ = table.userData.drawerOpenZ;
       drawerGroup.position.z = drawerClosedZ;
     }
 
     function toggleDrawer() {
-      if (!drawerGroup) return;
       drawerOpen = !drawerOpen;
       drawerGroup.position.z = drawerOpen ? drawerOpenZ : drawerClosedZ;
     }
 
-    // Helpers
-    function clientToNDC(clientX, clientY) {
-      return {
-        x: (clientX / window.innerWidth) * 2 - 1,
-        y: -(clientY / window.innerHeight) * 2 + 1
-      };
+    // ---- INPUT HANDLERS (move, rotate, tap) ----
+    function clientToNDC(x,y){
+      return { x:(x/window.innerWidth)*2-1, y:-(y/window.innerHeight)*2+1 };
     }
 
-    function onTouchStart(e) {
-      // Ignore UI panel touches
-      if (e.target instanceof Element && e.target.closest('#ui-panel')) return;
+    function onTouchStart(e){
+      if (!table) return;
 
-      if (e.touches.length === 1) {
-        const touch = e.touches[0];
-        lastTouchX = tapStartX = touch.clientX;
-        lastTouchY = tapStartY = touch.clientY;
+      if (e.touches.length===1){
+        const t = e.touches[0];
+        tapStartX = lastTouchX = t.clientX;
+        tapStartY = lastTouchY = t.clientY;
         tapStartTime = performance.now();
         potentialTap = true;
-
-        // don't start moving yet; we wait to see if user drags
         isMoving = false;
-      } else if (e.touches.length === 2 && table) {
-        e.preventDefault();
-        potentialTap = false;
-        isMoving = false;
+      }
+      else if (e.touches.length===2){
         isRotating = true;
-
-        const t1 = e.touches[0];
-        const t2 = e.touches[1];
-        initialAngle = Math.atan2(
-          t2.clientY - t1.clientY,
-          t2.clientX - t1.clientX
-        );
+        potentialTap = false;
+        const [t1,t2]=e.touches;
+        initialAngle = Math.atan2(t2.clientY-t1.clientY,t2.clientX-t1.clientX);
         initialRotY = table.rotation.y;
       }
     }
 
-    function onTouchMove(e) {
+    function onTouchMove(e){
       if (!table) return;
 
-      if (e.touches.length === 1) {
-        const touch = e.touches[0];
-        const x = touch.clientX;
-        const y = touch.clientY;
-        lastTouchX = x;
-        lastTouchY = y;
-
-        const dx = x - tapStartX;
-        const dy = y - tapStartY;
-        const distSq = dx * dx + dy * dy;
-
-        // If finger moved enough, it's a drag, not a tap
-        if (potentialTap && distSq > TAP_MAX_MOV * TAP_MAX_MOV) {
-          potentialTap = false;
-          isMoving = true;
-
-          e.preventDefault();
-
-          const ndc = clientToNDC(x, y);
-          dragPlane.setFromNormalAndCoplanarPoint(
-            new THREE.Vector3(0, 1, 0),
-            table.position
-          );
-
-          raycaster.setFromCamera(ndc, camera);
-          if (raycaster.ray.intersectPlane(dragPlane, dragPoint)) {
-            dragOffset.copy(table.position).addScaledVector(dragPoint, -1);
-          }
+      if (e.touches.length===1){
+        const t=e.touches[0], x=t.clientX, y=t.clientY;
+        lastTouchX=x; lastTouchY=y;
+        const dx=x-tapStartX, dy=y-tapStartY;
+        if (potentialTap && dx*dx+dy*dy>TAP_MAX_MOV*TAP_MAX_MOV){
+          potentialTap=false; isMoving=true;
+          const ndc=clientToNDC(x,y);
+          dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0,1,0), table.position);
+          raycaster.setFromCamera(ndc,camera);
+          if (raycaster.ray.intersectPlane(dragPlane,dragPoint))
+            dragOffset.copy(table.position).sub(dragPoint);
         }
-
-        if (isMoving) {
-          e.preventDefault();
-          const ndc = clientToNDC(x, y);
-          raycaster.setFromCamera(ndc, camera);
-          if (raycaster.ray.intersectPlane(dragPlane, dragPoint)) {
+        if (isMoving){
+          const ndc=clientToNDC(x,y);
+          raycaster.setFromCamera(ndc,camera);
+          if (raycaster.ray.intersectPlane(dragPlane,dragPoint))
             table.position.copy(dragPoint).add(dragOffset);
-          }
         }
-      } else if (isRotating && e.touches.length === 2) {
-        e.preventDefault();
-        const t1 = e.touches[0];
-        const t2 = e.touches[1];
-        const angle = Math.atan2(
-          t2.clientY - t1.clientY,
-          t2.clientX - t1.clientX
-        );
-        const delta = angle - initialAngle;
-        table.rotation.y = initialRotY - delta;
+      }
+      else if (e.touches.length===2 && isRotating){
+        const [t1,t2]=e.touches;
+        const angle=Math.atan2(t2.clientY-t1.clientY,t2.clientX-t1.clientX);
+        table.rotation.y = initialRotY - (angle-initialAngle);
       }
     }
 
-    function onTouchEnd(e) {
-      const now = performance.now();
-
-      // If all fingers lifted
-      if (e.touches.length === 0) {
-        if (potentialTap && !isMoving && !isRotating && (now - tapStartTime) <= TAP_MAX_TIME) {
-          // Short tap: do raycast to see if user tapped on the table
-          handleTap(lastTouchX, lastTouchY);
-        }
-
-        potentialTap = false;
-        isMoving = false;
-        isRotating = false;
-      } else if (e.touches.length === 1) {
-        // One finger left: stop rotation, next move can start drag again
-        isRotating = false;
-      }
-    }
-
-    function handleTap(clientX, clientY) {
+    function onTouchEnd(e){
       if (!table) return;
 
-      const ndc = clientToNDC(clientX, clientY);
-      raycaster.setFromCamera(ndc, camera);
-
-      const intersects = raycaster.intersectObject(table, true);
-      if (intersects.length > 0) {
-        // Tapped somewhere on the table/drawer → toggle drawer
-        toggleDrawer();
+      if (e.touches.length===0){
+        const now=performance.now();
+        if (potentialTap && now-tapStartTime < TAP_MAX_TIME){
+          const ndc=clientToNDC(lastTouchX,lastTouchY);
+          raycaster.setFromCamera(ndc,camera);
+          const hits=raycaster.intersectObject(table,true);
+          if (hits.length>0) toggleDrawer();
+        }
+        potentialTap=false; isMoving=false; isRotating=false;
       }
     }
 
-    function animate() {
-      renderer.setAnimationLoop(render);
-    }
+    // ---- AR Loop ----
+    function animate(){ renderer.setAnimationLoop(render); }
 
-    function render(timestamp, frame) {
-      const session = renderer.xr.getSession();
-      if (frame && session) {
-        const referenceSpace = renderer.xr.getReferenceSpace();
-
-        if (!hitTestSourceRequested) {
-          session.requestReferenceSpace('viewer').then((viewerSpace) => {
-            session.requestHitTestSource({ space: viewerSpace }).then((source) => {
-              hitTestSource = source;
-            });
-          });
-
-          session.addEventListener('end', () => {
-            hitTestSourceRequested = false;
-            hitTestSource = null;
-          });
-
-          hitTestSourceRequested = true;
+    function render(ts,frame){
+      const session=renderer.xr.getSession();
+      if (frame && session){
+        const ref=renderer.xr.getReferenceSpace();
+        if (!hitTestSourceRequested){
+          session.requestReferenceSpace('viewer')
+            .then(space=>session.requestHitTestSource({space}))
+            .then(src=>hitTestSource=src);
+          session.addEventListener("end",()=>{hitTestSourceRequested=false;hitTestSource=null;});
+          hitTestSourceRequested=true;
         }
 
-        if (hitTestSource) {
-          const hitTestResults = frame.getHitTestResults(hitTestSource);
-
-          if (hitTestResults.length) {
-            const hit = hitTestResults[0];
-            const pose = hit.getPose(referenceSpace);
-
-            reticle.visible = true;
+        if (hitTestSource){
+          const res=frame.getHitTestResults(hitTestSource);
+          if (res.length){
+            const pose=res[0].getPose(ref);
+            reticle.visible=true;
             reticle.matrix.fromArray(pose.transform.matrix);
-          } else {
-            reticle.visible = false;
-          }
+          } else reticle.visible=false;
         }
       }
-
-      renderer.render(scene, camera);
+      renderer.render(scene,camera);
     }
   </script>
 </body>
