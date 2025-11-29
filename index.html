@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>AR Single Cube - Move & Rotate</title>
+  <title>AR Single Table - Move & Rotate</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <style>
     body {
@@ -56,16 +56,16 @@
 <body>
   <div id="ui-panel">
     <label>W:
-      <input id="cubeWidth" type="number" step="0.01" value="0.3" />
+      <input id="tableWidth" type="number" step="0.01" value="1.0" />
     </label>
     <label>H:
-      <input id="cubeHeight" type="number" step="0.01" value="0.3" />
+      <input id="tableHeight" type="number" step="0.01" value="0.75" />
     </label>
     <label>D:
-      <input id="cubeDepth" type="number" step="0.01" value="0.3" />
+      <input id="tableDepth" type="number" step="0.01" value="0.6" />
     </label>
     <div id="info">
-      1️⃣ Tap to place/move cube · 1 finger = move · 2 fingers = rotate · Units: meters
+      Tap to place/move table · 1 finger = move · 2 fingers = rotate · Units: meters
     </div>
   </div>
 
@@ -79,24 +79,24 @@
     let hitTestSource = null;
     let hitTestSourceRequested = false;
 
-    const widthInput  = document.getElementById('cubeWidth');
-    const heightInput = document.getElementById('cubeHeight');
-    const depthInput  = document.getElementById('cubeDepth');
+    const widthInput  = document.getElementById('tableWidth');
+    const heightInput = document.getElementById('tableHeight');
+    const depthInput  = document.getElementById('tableDepth');
 
-    // Our single cube
-    let cube = null;
+    // Our single table (THREE.Group)
+    let table = null;
 
-    // For dragging (move on floor)
+    // Dragging (move on floor)
     const dragPlane   = new THREE.Plane();
     const raycaster   = new THREE.Raycaster();
     const dragPoint   = new THREE.Vector3();
     const dragOffset  = new THREE.Vector3();
     let isMoving      = false;
 
-    // For rotation (2-finger twist)
-    let isRotating      = false;
-    let initialAngle    = 0;
-    let initialRotY     = 0;
+    // Rotation (2-finger twist)
+    let isRotating   = false;
+    let initialAngle = 0;
+    let initialRotY  = 0;
 
     init();
     animate();
@@ -128,7 +128,7 @@
       });
       document.body.appendChild(arButton);
 
-      // Reticle (where the cube will be placed)
+      // Reticle (floor hit indicator)
       const ringGeo = new THREE.RingGeometry(0.06, 0.08, 32).rotateX(-Math.PI / 2);
       const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
       reticle = new THREE.Mesh(ringGeo, ringMat);
@@ -136,16 +136,16 @@
       reticle.visible = false;
       scene.add(reticle);
 
-      // AR controller (tap)
+      // AR controller tap
       controller = renderer.xr.getController(0);
       controller.addEventListener('select', onSelect);
       scene.add(controller);
 
-      // Touch gesture handlers
+      // Touch gestures
       window.addEventListener('touchstart', onTouchStart, { passive: false });
-      window.addEventListener('touchmove', onTouchMove, { passive: false });
-      window.addEventListener('touchend', onTouchEnd, { passive: false });
-      window.addEventListener('touchcancel', onTouchEnd, { passive: false });
+      window.addEventListener('touchmove',  onTouchMove,  { passive: false });
+      window.addEventListener('touchend',   onTouchEnd,   { passive: false });
+      window.addEventListener('touchcancel', onTouchEnd,  { passive: false });
 
       window.addEventListener('resize', onWindowResize, false);
     }
@@ -156,37 +156,78 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
-    function getCubeDimensions() {
+    function getTableDimensions() {
       let w = parseFloat(widthInput.value);
       let h = parseFloat(heightInput.value);
       let d = parseFloat(depthInput.value);
 
-      if (!w || w <= 0) w = 0.3;
-      if (!h || h <= 0) h = 0.3;
-      if (!d || d <= 0) d = 0.3;
+      if (!w || w <= 0) w = 1.0;
+      if (!h || h <= 0) h = 0.75;
+      if (!d || d <= 0) d = 0.6;
 
       return { w, h, d };
     }
 
-    // Tap on AR controller: place or move the single cube
+    // Build a table with top + 4 legs
+    // Origin at the bottom center (legs’ bottoms at y = 0)
+    function createTable(w, h, d) {
+      const group = new THREE.Group();
+
+      const topThickness = Math.max(0.03, h * 0.05); // 5% of height, min 3cm
+      const legHeight    = Math.max(0.1, h - topThickness);
+      const legThickness = Math.max(0.03, Math.min(w, d) * 0.07); // 7% of min(width, depth)
+
+      // Table top
+      const topGeo = new THREE.BoxGeometry(w, topThickness, d);
+      const topMat = new THREE.MeshStandardMaterial({ color: 0x804000 }); // brown-ish
+      const top    = new THREE.Mesh(topGeo, topMat);
+      top.position.set(0, legHeight + topThickness / 2, 0);
+      group.add(top);
+
+      // Legs
+      const legGeo = new THREE.BoxGeometry(legThickness, legHeight, legThickness);
+      const legMat = new THREE.MeshStandardMaterial({ color: 0x402000 });
+
+      const xOffset = w / 2 - legThickness / 2;
+      const zOffset = d / 2 - legThickness / 2;
+
+      const positions = [
+        [ xOffset, legHeight / 2,  zOffset],
+        [-xOffset, legHeight / 2,  zOffset],
+        [ xOffset, legHeight / 2, -zOffset],
+        [-xOffset, legHeight / 2, -zOffset]
+      ];
+
+      for (const [x, y, z] of positions) {
+        const leg = new THREE.Mesh(legGeo, legMat);
+        leg.position.set(x, y, z);
+        group.add(leg);
+      }
+
+      return group;
+    }
+
+    // Tap in AR: place/move single table
     function onSelect() {
       if (!reticle.visible) return;
 
-      if (!cube) {
-        // Create cube first time
-        const { w, h, d } = getCubeDimensions();
-        const geometry = new THREE.BoxGeometry(w, h, d);
-        const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-        cube = new THREE.Mesh(geometry, material);
-        scene.add(cube);
+      const { w, h, d } = getTableDimensions();
+
+      // (Re)create table so it follows latest dimensions
+      if (table) {
+        scene.remove(table);
+        table = null;
       }
 
-      // Place/move cube at reticle pose
-      cube.position.setFromMatrixPosition(reticle.matrix);
-      cube.quaternion.setFromRotationMatrix(reticle.matrix);
+      table = createTable(w, h, d);
+      scene.add(table);
+
+      // Place at reticle pose (reticle is at floor level)
+      table.position.setFromMatrixPosition(reticle.matrix);
+      table.quaternion.setFromRotationMatrix(reticle.matrix);
     }
 
-    // Convert screen (client) position to normalized device coordinates
+    // Convert client coords to NDC
     function clientToNDC(clientX, clientY) {
       return {
         x: (clientX / window.innerWidth) * 2 - 1,
@@ -195,8 +236,10 @@
     }
 
     function onTouchStart(e) {
-      if (!cube) return; // nothing to move/rotate yet
+      if (!table) return;
+
       if (e.touches.length === 1) {
+        // Move on floor
         e.preventDefault();
         isMoving = true;
         isRotating = false;
@@ -204,33 +247,35 @@
         const touch = e.touches[0];
         const ndc = clientToNDC(touch.clientX, touch.clientY);
 
-        // Drag on a horizontal plane passing through the cube
+        // Plane at table's base height
         dragPlane.setFromNormalAndCoplanarPoint(
           new THREE.Vector3(0, 1, 0),
-          cube.position
+          table.position
         );
 
         raycaster.setFromCamera(ndc, camera);
         if (raycaster.ray.intersectPlane(dragPlane, dragPoint)) {
-          dragOffset.copy(cube.position).addScaledVector(dragPoint, -1);
+          dragOffset.copy(table.position).addScaledVector(dragPoint, -1);
         }
       } else if (e.touches.length === 2) {
+        // Rotate around Y (vertical)
         e.preventDefault();
         isMoving = false;
         isRotating = true;
 
         const t1 = e.touches[0];
         const t2 = e.touches[1];
+
         initialAngle = Math.atan2(
           t2.clientY - t1.clientY,
           t2.clientX - t1.clientX
         );
-        initialRotY = cube.rotation.y;
+        initialRotY = table.rotation.y;
       }
     }
 
     function onTouchMove(e) {
-      if (!cube) return;
+      if (!table) return;
 
       if (isMoving && e.touches.length === 1) {
         e.preventDefault();
@@ -239,20 +284,20 @@
 
         raycaster.setFromCamera(ndc, camera);
         if (raycaster.ray.intersectPlane(dragPlane, dragPoint)) {
-          cube.position.copy(dragPoint).add(dragOffset);
+          table.position.copy(dragPoint).add(dragOffset);
         }
       } else if (isRotating && e.touches.length === 2) {
         e.preventDefault();
         const t1 = e.touches[0];
         const t2 = e.touches[1];
+
         const angle = Math.atan2(
           t2.clientY - t1.clientY,
           t2.clientX - t1.clientX
         );
         const delta = angle - initialAngle;
 
-        // Rotate around vertical axis (Y)
-        cube.rotation.y = initialRotY - delta;
+        table.rotation.y = initialRotY - delta;
       }
     }
 
@@ -261,8 +306,7 @@
         isMoving = false;
         isRotating = false;
       } else if (e.touches.length === 1) {
-        // If one finger remains after a 2-finger gesture,
-        // stop rotation and allow starting a new move on next touchstart.
+        // Stop rotation when one finger remains
         isRotating = false;
       }
     }
