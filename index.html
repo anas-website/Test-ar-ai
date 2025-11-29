@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>AR Cube with Custom Dimensions & Rotation</title>
+  <title>AR Single Cube - Move & Rotate</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <style>
     body {
@@ -56,15 +56,17 @@
 <body>
   <div id="ui-panel">
     <label>W:
-      <input id="cubeWidth" type="number" step="0.01" value="0.15" />
+      <input id="cubeWidth" type="number" step="0.01" value="0.3" />
     </label>
     <label>H:
-      <input id="cubeHeight" type="number" step="0.01" value="0.15" />
+      <input id="cubeHeight" type="number" step="0.01" value="0.3" />
     </label>
     <label>D:
-      <input id="cubeDepth" type="number" step="0.01" value="0.15" />
+      <input id="cubeDepth" type="number" step="0.01" value="0.3" />
     </label>
-    <div id="info">Tap to place cube. Drag left/right to rotate last cube. Units: meters.</div>
+    <div id="info">
+      1️⃣ Tap to place/move cube · 1 finger = move · 2 fingers = rotate · Units: meters
+    </div>
   </div>
 
   <script type="module">
@@ -81,10 +83,20 @@
     const heightInput = document.getElementById('cubeHeight');
     const depthInput  = document.getElementById('cubeDepth');
 
-    // For rotation
-    let activeCube = null;
-    let isDragging = false;
-    let lastX = 0;
+    // Our single cube
+    let cube = null;
+
+    // For dragging (move on floor)
+    const dragPlane   = new THREE.Plane();
+    const raycaster   = new THREE.Raycaster();
+    const dragPoint   = new THREE.Vector3();
+    const dragOffset  = new THREE.Vector3();
+    let isMoving      = false;
+
+    // For rotation (2-finger twist)
+    let isRotating      = false;
+    let initialAngle    = 0;
+    let initialRotY     = 0;
 
     init();
     animate();
@@ -116,7 +128,7 @@
       });
       document.body.appendChild(arButton);
 
-      // Reticle (placement helper)
+      // Reticle (where the cube will be placed)
       const ringGeo = new THREE.RingGeometry(0.06, 0.08, 32).rotateX(-Math.PI / 2);
       const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
       reticle = new THREE.Mesh(ringGeo, ringMat);
@@ -124,20 +136,16 @@
       reticle.visible = false;
       scene.add(reticle);
 
-      // Controller (tap in AR to place cube)
+      // AR controller (tap)
       controller = renderer.xr.getController(0);
       controller.addEventListener('select', onSelect);
       scene.add(controller);
 
-      // Touch events for rotation
-      window.addEventListener('touchstart', onTouchStart, { passive: true });
-      window.addEventListener('touchmove', onTouchMove, { passive: true });
-      window.addEventListener('touchend', onTouchEnd, { passive: true });
-
-      // (Optional) mouse drag for desktop testing
-      window.addEventListener('mousedown', onMouseDown);
-      window.addEventListener('mousemove', onMouseMove);
-      window.addEventListener('mouseup', onMouseUp);
+      // Touch gesture handlers
+      window.addEventListener('touchstart', onTouchStart, { passive: false });
+      window.addEventListener('touchmove', onTouchMove, { passive: false });
+      window.addEventListener('touchend', onTouchEnd, { passive: false });
+      window.addEventListener('touchcancel', onTouchEnd, { passive: false });
 
       window.addEventListener('resize', onWindowResize, false);
     }
@@ -153,73 +161,110 @@
       let h = parseFloat(heightInput.value);
       let d = parseFloat(depthInput.value);
 
-      if (!w || w <= 0) w = 0.15;
-      if (!h || h <= 0) h = 0.15;
-      if (!d || d <= 0) d = 0.15;
+      if (!w || w <= 0) w = 0.3;
+      if (!h || h <= 0) h = 0.3;
+      if (!d || d <= 0) d = 0.3;
 
       return { w, h, d };
     }
 
+    // Tap on AR controller: place or move the single cube
     function onSelect() {
       if (!reticle.visible) return;
 
-      const { w, h, d } = getCubeDimensions();
+      if (!cube) {
+        // Create cube first time
+        const { w, h, d } = getCubeDimensions();
+        const geometry = new THREE.BoxGeometry(w, h, d);
+        const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+        cube = new THREE.Mesh(geometry, material);
+        scene.add(cube);
+      }
 
-      const geometry = new THREE.BoxGeometry(w, h, d);
-      const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-      const cube = new THREE.Mesh(geometry, material);
-
-      // Place the cube on the floor where the reticle is
+      // Place/move cube at reticle pose
       cube.position.setFromMatrixPosition(reticle.matrix);
       cube.quaternion.setFromRotationMatrix(reticle.matrix);
-
-      scene.add(cube);
-
-      // This cube becomes the "active" one for rotation
-      activeCube = cube;
     }
 
-    // --- Touch rotation handlers ---
+    // Convert screen (client) position to normalized device coordinates
+    function clientToNDC(clientX, clientY) {
+      return {
+        x: (clientX / window.innerWidth) * 2 - 1,
+        y: -(clientY / window.innerHeight) * 2 + 1
+      };
+    }
+
     function onTouchStart(e) {
-      if (!activeCube) return;
-      if (e.touches.length !== 1) return; // single-finger rotate
-      isDragging = true;
-      lastX = e.touches[0].clientX;
+      if (!cube) return; // nothing to move/rotate yet
+      if (e.touches.length === 1) {
+        e.preventDefault();
+        isMoving = true;
+        isRotating = false;
+
+        const touch = e.touches[0];
+        const ndc = clientToNDC(touch.clientX, touch.clientY);
+
+        // Drag on a horizontal plane passing through the cube
+        dragPlane.setFromNormalAndCoplanarPoint(
+          new THREE.Vector3(0, 1, 0),
+          cube.position
+        );
+
+        raycaster.setFromCamera(ndc, camera);
+        if (raycaster.ray.intersectPlane(dragPlane, dragPoint)) {
+          dragOffset.copy(cube.position).addScaledVector(dragPoint, -1);
+        }
+      } else if (e.touches.length === 2) {
+        e.preventDefault();
+        isMoving = false;
+        isRotating = true;
+
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        initialAngle = Math.atan2(
+          t2.clientY - t1.clientY,
+          t2.clientX - t1.clientX
+        );
+        initialRotY = cube.rotation.y;
+      }
     }
 
     function onTouchMove(e) {
-      if (!isDragging || !activeCube) return;
-      const x = e.touches[0].clientX;
-      const deltaX = x - lastX;
-      lastX = x;
+      if (!cube) return;
 
-      // Adjust factor to make rotation faster/slower
-      const rotationSpeed = 0.01;
-      activeCube.rotation.y += deltaX * rotationSpeed;
+      if (isMoving && e.touches.length === 1) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const ndc = clientToNDC(touch.clientX, touch.clientY);
+
+        raycaster.setFromCamera(ndc, camera);
+        if (raycaster.ray.intersectPlane(dragPlane, dragPoint)) {
+          cube.position.copy(dragPoint).add(dragOffset);
+        }
+      } else if (isRotating && e.touches.length === 2) {
+        e.preventDefault();
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const angle = Math.atan2(
+          t2.clientY - t1.clientY,
+          t2.clientX - t1.clientX
+        );
+        const delta = angle - initialAngle;
+
+        // Rotate around vertical axis (Y)
+        cube.rotation.y = initialRotY - delta;
+      }
     }
 
-    function onTouchEnd() {
-      isDragging = false;
-    }
-
-    // --- Mouse rotation (for testing on desktop browser) ---
-    function onMouseDown(e) {
-      if (!activeCube) return;
-      isDragging = true;
-      lastX = e.clientX;
-    }
-
-    function onMouseMove(e) {
-      if (!isDragging || !activeCube) return;
-      const x = e.clientX;
-      const deltaX = x - lastX;
-      lastX = x;
-      const rotationSpeed = 0.01;
-      activeCube.rotation.y += deltaX * rotationSpeed;
-    }
-
-    function onMouseUp() {
-      isDragging = false;
+    function onTouchEnd(e) {
+      if (e.touches.length === 0) {
+        isMoving = false;
+        isRotating = false;
+      } else if (e.touches.length === 1) {
+        // If one finger remains after a 2-finger gesture,
+        // stop rotation and allow starting a new move on next touchstart.
+        isRotating = false;
+      }
     }
 
     function animate() {
