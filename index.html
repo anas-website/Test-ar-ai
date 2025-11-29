@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>AR Cube with Custom Dimensions</title>
+  <title>AR Cube with Custom Dimensions & Rotation</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <style>
     body {
@@ -64,7 +64,7 @@
     <label>D:
       <input id="cubeDepth" type="number" step="0.01" value="0.15" />
     </label>
-    <div id="info">Units: meters. Move phone to find the floor, then tap to place cube.</div>
+    <div id="info">Tap to place cube. Drag left/right to rotate last cube. Units: meters.</div>
   </div>
 
   <script type="module">
@@ -80,6 +80,11 @@
     const widthInput  = document.getElementById('cubeWidth');
     const heightInput = document.getElementById('cubeHeight');
     const depthInput  = document.getElementById('cubeDepth');
+
+    // For rotation
+    let activeCube = null;
+    let isDragging = false;
+    let lastX = 0;
 
     init();
     animate();
@@ -111,7 +116,7 @@
       });
       document.body.appendChild(arButton);
 
-      // Reticle (where the cube will be placed)
+      // Reticle (placement helper)
       const ringGeo = new THREE.RingGeometry(0.06, 0.08, 32).rotateX(-Math.PI / 2);
       const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
       reticle = new THREE.Mesh(ringGeo, ringMat);
@@ -119,10 +124,20 @@
       reticle.visible = false;
       scene.add(reticle);
 
-      // Controller (tap to place cube)
+      // Controller (tap in AR to place cube)
       controller = renderer.xr.getController(0);
       controller.addEventListener('select', onSelect);
       scene.add(controller);
+
+      // Touch events for rotation
+      window.addEventListener('touchstart', onTouchStart, { passive: true });
+      window.addEventListener('touchmove', onTouchMove, { passive: true });
+      window.addEventListener('touchend', onTouchEnd, { passive: true });
+
+      // (Optional) mouse drag for desktop testing
+      window.addEventListener('mousedown', onMouseDown);
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
 
       window.addEventListener('resize', onWindowResize, false);
     }
@@ -134,7 +149,6 @@
     }
 
     function getCubeDimensions() {
-      // Read values from inputs, fallback to 0.15 m if invalid
       let w = parseFloat(widthInput.value);
       let h = parseFloat(heightInput.value);
       let d = parseFloat(depthInput.value);
@@ -155,11 +169,57 @@
       const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
       const cube = new THREE.Mesh(geometry, material);
 
-      // Place the cube on the reticle position
+      // Place the cube on the floor where the reticle is
       cube.position.setFromMatrixPosition(reticle.matrix);
       cube.quaternion.setFromRotationMatrix(reticle.matrix);
 
       scene.add(cube);
+
+      // This cube becomes the "active" one for rotation
+      activeCube = cube;
+    }
+
+    // --- Touch rotation handlers ---
+    function onTouchStart(e) {
+      if (!activeCube) return;
+      if (e.touches.length !== 1) return; // single-finger rotate
+      isDragging = true;
+      lastX = e.touches[0].clientX;
+    }
+
+    function onTouchMove(e) {
+      if (!isDragging || !activeCube) return;
+      const x = e.touches[0].clientX;
+      const deltaX = x - lastX;
+      lastX = x;
+
+      // Adjust factor to make rotation faster/slower
+      const rotationSpeed = 0.01;
+      activeCube.rotation.y += deltaX * rotationSpeed;
+    }
+
+    function onTouchEnd() {
+      isDragging = false;
+    }
+
+    // --- Mouse rotation (for testing on desktop browser) ---
+    function onMouseDown(e) {
+      if (!activeCube) return;
+      isDragging = true;
+      lastX = e.clientX;
+    }
+
+    function onMouseMove(e) {
+      if (!isDragging || !activeCube) return;
+      const x = e.clientX;
+      const deltaX = x - lastX;
+      lastX = x;
+      const rotationSpeed = 0.01;
+      activeCube.rotation.y += deltaX * rotationSpeed;
+    }
+
+    function onMouseUp() {
+      isDragging = false;
     }
 
     function animate() {
