@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>AR Cube on Floor</title>
+  <title>AR Cube with Custom Dimensions</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <style>
     body {
@@ -11,22 +11,61 @@
       font-family: system-ui, sans-serif;
       background: #000;
     }
-    #info {
+
+    #ui-panel {
       position: absolute;
       top: 10px;
       left: 50%;
       transform: translateX(-50%);
-      padding: 8px 12px;
-      background: rgba(0, 0, 0, 0.5);
+      background: rgba(0, 0, 0, 0.6);
       color: #fff;
-      font-size: 14px;
-      border-radius: 6px;
-      z-index: 1;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      z-index: 2;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #ui-panel label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    #ui-panel input {
+      width: 50px;
+      padding: 2px 4px;
+      border-radius: 4px;
+      border: 1px solid #555;
+      font-size: 12px;
+    }
+
+    #info {
+      width: 100%;
+      text-align: center;
+      margin-top: 4px;
+      font-size: 11px;
+      opacity: 0.85;
     }
   </style>
 </head>
 <body>
-  <div id="info">Move your phone to find the floor, then tap to place a cube.</div>
+  <div id="ui-panel">
+    <label>W:
+      <input id="cubeWidth" type="number" step="0.01" value="0.15" />
+    </label>
+    <label>H:
+      <input id="cubeHeight" type="number" step="0.01" value="0.15" />
+    </label>
+    <label>D:
+      <input id="cubeDepth" type="number" step="0.01" value="0.15" />
+    </label>
+    <div id="info">Units: meters. Move phone to find the floor, then tap to place cube.</div>
+  </div>
 
   <script type="module">
     import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
@@ -38,13 +77,22 @@
     let hitTestSource = null;
     let hitTestSourceRequested = false;
 
+    const widthInput  = document.getElementById('cubeWidth');
+    const heightInput = document.getElementById('cubeHeight');
+    const depthInput  = document.getElementById('cubeDepth');
+
     init();
     animate();
 
     function init() {
       // Scene & camera
       scene = new THREE.Scene();
-      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+      camera = new THREE.PerspectiveCamera(
+        70,
+        window.innerWidth / window.innerHeight,
+        0.01,
+        20
+      );
 
       // Light
       const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.0);
@@ -57,13 +105,13 @@
       renderer.xr.enabled = true;
       document.body.appendChild(renderer.domElement);
 
-      // AR button (requests 'hit-test' feature)
+      // AR Button
       const arButton = ARButton.createButton(renderer, {
         requiredFeatures: ['hit-test']
       });
       document.body.appendChild(arButton);
 
-      // Reticle to show where we can place the cube
+      // Reticle (where the cube will be placed)
       const ringGeo = new THREE.RingGeometry(0.06, 0.08, 32).rotateX(-Math.PI / 2);
       const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
       reticle = new THREE.Mesh(ringGeo, ringMat);
@@ -85,14 +133,29 @@
       renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
+    function getCubeDimensions() {
+      // Read values from inputs, fallback to 0.15 m if invalid
+      let w = parseFloat(widthInput.value);
+      let h = parseFloat(heightInput.value);
+      let d = parseFloat(depthInput.value);
+
+      if (!w || w <= 0) w = 0.15;
+      if (!h || h <= 0) h = 0.15;
+      if (!d || d <= 0) d = 0.15;
+
+      return { w, h, d };
+    }
+
     function onSelect() {
       if (!reticle.visible) return;
 
-      const geometry = new THREE.BoxGeometry(0.15, 0.15, 0.15);
+      const { w, h, d } = getCubeDimensions();
+
+      const geometry = new THREE.BoxGeometry(w, h, d);
       const material = new THREE.MeshStandardMaterial({ color: 0xff0000 });
       const cube = new THREE.Mesh(geometry, material);
 
-      // Place the cube where the reticle is
+      // Place the cube on the reticle position
       cube.position.setFromMatrixPosition(reticle.matrix);
       cube.quaternion.setFromRotationMatrix(reticle.matrix);
 
