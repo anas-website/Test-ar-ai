@@ -62,12 +62,13 @@
         </div>
         
         <div class="control-group">
-            <div class="control-label"><span>Material Color</span></div>
+            <div class="control-label"><span>Material Option</span></div>
             <div class="flex gap-2 mt-2">
-                <button onclick="setMaterial('#8B5A2B')" class="w-8 h-8 rounded-full border-2 border-white/20 hover:scale-110 transition bg-[#8B5A2B]" title="Wood"></button>
-                <button onclick="setMaterial('#222222')" class="w-8 h-8 rounded-full border-2 border-white/20 hover:scale-110 transition bg-[#222222]" title="Black Metal"></button>
-                <button onclick="setMaterial('#eeeeee')" class="w-8 h-8 rounded-full border-2 border-white/20 hover:scale-110 transition bg-[#eeeeee]" title="White"></button>
-                <button onclick="setMaterial('#5D4037')" class="w-8 h-8 rounded-full border-2 border-white/20 hover:scale-110 transition bg-[#5D4037]" title="Dark Wood"></button>
+                <button onclick="setMaterial('#e8c39e', 'wood')" class="w-8 h-8 rounded-full border-2 border-white/20 hover:scale-110 transition bg-[#e8c39e]" title="Light Wood"></button>
+                <button onclick="setMaterial('#8B5A2B', 'wood')" class="w-8 h-8 rounded-full border-2 border-white/20 hover:scale-110 transition bg-[#8B5A2B]" title="Medium Wood"></button>
+                <button onclick="setMaterial('#5D4037', 'wood')" class="w-8 h-8 rounded-full border-2 border-white/20 hover:scale-110 transition bg-[#5D4037]" title="Dark Wood"></button>
+                <button onclick="setMaterial('#222222', 'solid')" class="w-8 h-8 rounded-full border-2 border-white/20 hover:scale-110 transition bg-[#222222]" title="Black Metal"></button>
+                <button onclick="setMaterial('#eeeeee', 'solid')" class="w-8 h-8 rounded-full border-2 border-white/20 hover:scale-110 transition bg-[#eeeeee]" title="White"></button>
             </div>
         </div>
 
@@ -101,7 +102,15 @@
         let hitTestSource = null;
         let hitTestSourceRequested = false;
         let shelfGroup; // The object that holds all shelf parts
-        let currentMaterial;
+        let currentMaterial, woodMaterial, solidMaterial;
+        let woodTextures = {};
+
+        // Texture URLs (using reliable examples from three.js repo)
+        const textureUrls = {
+            diffuse: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/hardwood2_diffuse.jpg',
+            roughness: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/hardwood2_roughness.jpg',
+            normal: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/hardwood2_normal.jpg'
+        };
 
         // Configuration
         const config = {
@@ -110,7 +119,8 @@
             depth: 30,
             shelves: 4,
             thickness: 2.5, // cm
-            color: '#8B5A2B'
+            color: '#8B5A2B',
+            materialType: 'wood'
         };
 
         // UI Elements
@@ -136,11 +146,13 @@
             hemisphereLight.position.set(0.5, 1, 0.25);
             scene.add(hemisphereLight);
 
-            const light = new THREE.DirectionalLight(0xffffff, 3);
+            const light = new THREE.DirectionalLight(0xffffff, 3.5);
             light.position.set(0, 5, 2);
             light.castShadow = true;
             light.shadow.mapSize.width = 1024;
             light.shadow.mapSize.height = 1024;
+            light.shadow.camera.near = 0.1;
+            light.shadow.camera.far = 10;
             scene.add(light);
 
             // Renderer
@@ -150,6 +162,7 @@
             renderer.xr.enabled = true; // Enable WebXR
             renderer.shadowMap.enabled = true;
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.outputColorSpace = THREE.SRGBColorSpace; // Important for correct color rendering with textures
             container.appendChild(renderer.domElement);
 
             // Orbit Controls (for non-AR view)
@@ -175,17 +188,56 @@
                 shelfGroup.visible = true;
             });
 
-            // Initial Material
-            currentMaterial = new THREE.MeshStandardMaterial({ 
-                color: config.color, 
+            // Load Textures
+            const textureLoader = new THREE.TextureLoader();
+            woodTextures.diffuse = textureLoader.load(textureUrls.diffuse);
+            woodTextures.roughness = textureLoader.load(textureUrls.roughness);
+            woodTextures.normal = textureLoader.load(textureUrls.normal);
+
+            // Configure textures for tiling
+            [woodTextures.diffuse, woodTextures.roughness, woodTextures.normal].forEach(tex => {
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                tex.colorSpace = THREE.SRGBColorSpace; // Ensure correct color space for diffuse maps
+            });
+            // Normal and roughness maps should be linear
+            woodTextures.roughness.colorSpace = THREE.NoColorSpace;
+            woodTextures.normal.colorSpace = THREE.NoColorSpace;
+
+
+            // Initialize Materials
+            // 1. Wood Material (with textures)
+            woodMaterial = new THREE.MeshStandardMaterial({ 
+                name: 'woodMaterial',
+                color: config.color, // This will tint the texture
+                map: woodTextures.diffuse,
+                roughnessMap: woodTextures.roughness,
+                normalMap: woodTextures.normal,
+                roughness: 0.8,
+                metalness: 0.0
+            });
+
+            // 2. Solid Material (no textures, for plain colors)
+            solidMaterial = new THREE.MeshStandardMaterial({
+                name: 'solidMaterial',
+                color: '#ffffff',
                 roughness: 0.6,
                 metalness: 0.1
             });
 
+            // Set initial material based on config
+            currentMaterial = config.materialType === 'wood' ? woodMaterial : solidMaterial;
+            if (config.materialType === 'wood') woodMaterial.color.set(config.color);
+
             // Build initial Shelf
             shelfGroup = new THREE.Group();
             scene.add(shelfGroup);
-            updateShelfGeometry();
+            // Wait for textures to load before first build to avoid visual glitches
+            const loadingManager = new THREE.LoadingManager(() => {
+                updateShelfGeometry();
+            });
+            textureLoader.manager = loadingManager;
+
 
             // AR Reticle (The targeting ring)
             reticle = new THREE.Mesh(
@@ -222,18 +274,27 @@
                 });
             });
 
-            // Make setMaterial global so buttons can call it
-            window.setMaterial = (color) => {
+            // Updated setMaterial function to handle material type
+            window.setMaterial = (color, type) => {
                 config.color = color;
-                currentMaterial.color.set(color);
-                // Roughness tweak for metal vs wood look
-                if(color === '#222222') {
-                    currentMaterial.roughness = 0.2;
-                    currentMaterial.metalness = 0.8;
+                config.materialType = type;
+
+                if (type === 'wood') {
+                    currentMaterial = woodMaterial;
+                    woodMaterial.color.set(color); // Tint the wood texture
                 } else {
-                    currentMaterial.roughness = 0.6;
-                    currentMaterial.metalness = 0.1;
+                    currentMaterial = solidMaterial;
+                    solidMaterial.color.set(color);
+                    // Roughness tweak for metal vs white look
+                    if(color === '#222222') { // Black Metal
+                        solidMaterial.roughness = 0.2;
+                        solidMaterial.metalness = 0.8;
+                    } else { // White/Other
+                        solidMaterial.roughness = 0.6;
+                        solidMaterial.metalness = 0.1;
+                    }
                 }
+                updateShelfGeometry();
             };
 
             // Mobile toggle
@@ -245,7 +306,16 @@
         function updateShelfGeometry() {
             // Remove old children
             while(shelfGroup.children.length > 0){ 
-                shelfGroup.remove(shelfGroup.children[0]); 
+                const child = shelfGroup.children[0];
+                // Dispose geometry and material to prevent memory leaks
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) {
+                    // Only dispose if it's a cloned material instance
+                    if (child.material.name.includes('cloned')) {
+                        child.material.dispose();
+                    }
+                }
+                shelfGroup.remove(child); 
             }
 
             // Convert CM to Meters (WebXR uses meters)
@@ -254,10 +324,42 @@
             const d = config.depth / 100;
             const t = (config.thickness / 100); 
 
-            // Helper to create box
+            // Helper to create box with smart texture scaling
             const createBox = (width, height, depth, x, y, z) => {
                 const geometry = new THREE.BoxGeometry(width, height, depth);
-                const mesh = new THREE.Mesh(geometry, currentMaterial);
+                let material = currentMaterial;
+
+                // If using wood material, we must clone it per-mesh to adjust texture repeat
+                // so the grain doesn't look stretched on differently sized pieces.
+                if (currentMaterial.name === 'woodMaterial') {
+                    material = currentMaterial.clone();
+                    material.name = 'woodMaterial-cloned'; // Mark for disposal
+                    
+                    const textureScale = 3.0; // Adjust density of wood grain
+
+                    // BoxGeometry UV mapping is complex (different faces use different dimensions).
+                    // A simple approximation is to scale repeats based on the largest dimensions
+                    // of the piece to maintain a roughly consistent density.
+                    // For vertical pieces (sides), scale by depth & height.
+                    // For horizontal pieces (shelves, top/bottom), scale by width & depth.
+                    
+                    let repeatX, repeatY;
+                    if (height > width && height > depth) {
+                        // Vertical piece pattern
+                        repeatX = depth * textureScale;
+                        repeatY = height * textureScale;
+                    } else {
+                        // Horizontal piece pattern
+                        repeatX = width * textureScale;
+                        repeatY = depth * textureScale;
+                    }
+
+                    material.map.repeat.set(repeatX, repeatY);
+                    material.roughnessMap.repeat.set(repeatX, repeatY);
+                    material.normalMap.repeat.set(repeatX, repeatY);
+                }
+
+                const mesh = new THREE.Mesh(geometry, material);
                 mesh.position.set(x, y, z);
                 mesh.castShadow = true;
                 mesh.receiveShadow = true;
@@ -286,9 +388,6 @@
                 const yPos = (spacing * i) + t; // Offset by bottom thickness
                 shelfGroup.add(createBox(w - (2*t), t, d, 0, yPos, 0));
             }
-
-            // Center the group visually in Editor mode (but pivots from bottom 0,0,0)
-            // No offset needed because we built it going UP from y=0
         }
 
         function onSelect() {
