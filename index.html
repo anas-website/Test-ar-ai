@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AR Shelf Designer</title>
+    <title>AR Shelf Designer v2</title>
     
     <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.3.0/model-viewer.min.js"></script>
 
@@ -17,115 +17,33 @@
     </script>
 
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0;
-            background-color: #f5f5f5;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-        }
-
-        /* UI Panel Styles */
-        #controls {
-            background: white;
-            padding: 20px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            z-index: 10;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 15px;
-            align-items: flex-end;
-            justify-content: center;
-        }
-
-        .input-group {
-            display: flex;
-            flex-direction: column;
-        }
-
-        label {
-            font-size: 12px;
-            font-weight: bold;
-            color: #666;
-            margin-bottom: 5px;
-        }
-
-        input {
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            width: 80px;
-        }
-
-        button {
-            background-color: #007bff;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: background 0.2s;
-        }
-
-        button:hover {
-            background-color: #0056b3;
-        }
-
-        /* AR Viewer Styles */
-        #viewer-container {
-            flex-grow: 1;
-            position: relative;
-            background: #eee;
-        }
-
-        model-viewer {
-            width: 100%;
-            height: 100%;
-            background-color: #e0e0e0;
-            --poster-color: #e0e0e0;
-        }
-
-        /* Loading Overlay */
-        #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            display: none;
-            background: rgba(0,0,0,0.7);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 20px;
+        body { margin: 0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; }
+        #controls { background: white; padding: 15px; border-bottom: 1px solid #ccc; z-index: 10; display: flex; gap: 10px; flex-wrap: wrap; }
+        input { width: 50px; padding: 5px; }
+        button { background: #007bff; color: white; border: none; padding: 8px 15px; border-radius: 4px; }
+        #viewer-container { flex-grow: 1; position: relative; background: #eee; }
+        model-viewer { width: 100%; height: 100%; }
+        
+        /* Debug Console Styles */
+        #debug-console {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            background: rgba(0,0,0,0.8); color: lime; font-family: monospace;
+            padding: 10px; font-size: 12px; height: 100px; overflow-y: auto;
+            pointer-events: none; z-index: 100;
         }
     </style>
 </head>
 <body>
 
     <div id="controls">
-        <div class="input-group">
-            <label>Height (cm)</label>
-            <input type="number" id="hInput" value="180">
-        </div>
-        <div class="input-group">
-            <label>Width (cm)</label>
-            <input type="number" id="wInput" value="80">
-        </div>
-        <div class="input-group">
-            <label>Depth (cm)</label>
-            <input type="number" id="dInput" value="30">
-        </div>
-        <div class="input-group">
-            <label>Shelves</label>
-            <input type="number" id="sInput" value="4">
-        </div>
-        <button onclick="generateShelf()">Generate & Update AR</button>
+        H: <input type="number" id="hInput" value="180">
+        W: <input type="number" id="wInput" value="80">
+        D: <input type="number" id="dInput" value="30">
+        Shelves: <input type="number" id="sInput" value="4">
+        <button onclick="generateShelf()">Update Model</button>
     </div>
 
     <div id="viewer-container">
-        <div id="loading">Generating 3D Model...</div>
-        
         <model-viewer 
             id="shelf-viewer"
             src="" 
@@ -133,121 +51,96 @@
             ar-modes="webxr scene-viewer quick-look" 
             camera-controls 
             shadow-intensity="1"
-            environment-image="neutral" 
             auto-rotate>
+            
+            <button slot="ar-button" style="background-color: white; border-radius: 4px; border: none; position: absolute; top: 16px; right: 16px; height: 36px; padding: 0 16px;">
+                👋 Activate AR
+            </button>
         </model-viewer>
+        
+        <div id="debug-console">System Ready...<br></div>
     </div>
 
     <script type="module">
         import * as THREE from 'three';
         import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 
-        // Initialize Three.js variables (offscreen)
+        // Custom Logger
+        function log(msg) {
+            const c = document.getElementById('debug-console');
+            c.innerHTML += `> ${msg}<br>`;
+            c.scrollTop = c.scrollHeight;
+            console.log(msg);
+        }
+
         const scene = new THREE.Scene();
-        // Wood Material
-        const material = new THREE.MeshStandardMaterial({ 
-            color: 0x8B5A2B, // Saddle Brown
-            roughness: 0.6,
-            metalness: 0.1
-        });
+        const material = new THREE.MeshStandardMaterial({ color: 0x8B5A2B });
 
         window.generateShelf = function() {
-            const h = parseFloat(document.getElementById('hInput').value); // cm
-            const w = parseFloat(document.getElementById('wInput').value); // cm
-            const d = parseFloat(document.getElementById('dInput').value); // cm
+            log("Generating geometry...");
+            const h = parseFloat(document.getElementById('hInput').value) / 100;
+            const w = parseFloat(document.getElementById('wInput').value) / 100;
+            const d = parseFloat(document.getElementById('dInput').value) / 100;
             const shelvesCount = parseInt(document.getElementById('sInput').value);
-            
-            const thickness = 2; // 2cm thickness for wood
-            
-            // Show loading
-            document.getElementById('loading').style.display = 'block';
+            const thick = 0.02;
 
-            // Convert cm to meters for AR scale (1 unit = 1 meter usually in AR)
-            // But Model Viewer handles units well. We will work in units = cm, then scale down if needed.
-            // Actually, glTF defaults to meters. So let's convert inputs to meters.
-            const hm = h / 100;
-            const wm = w / 100;
-            const dm = d / 100;
-            const thickm = thickness / 100;
-
-            // Clear previous mesh
             scene.clear();
 
-            // 1. Create Side Panels (Left & Right)
-            const sideGeo = new THREE.BoxGeometry(thickm, hm, dm);
+            // Helper to make box
+            function makeBox(bx, by, bz, x, y, z) {
+                const geo = new THREE.BoxGeometry(bx, by, bz);
+                const mesh = new THREE.Mesh(geo, material);
+                mesh.position.set(x, y, z);
+                scene.add(mesh);
+            }
+
+            // Sides
+            makeBox(thick, h, d, -w/2 + thick/2, h/2, 0);
+            makeBox(thick, h, d, w/2 - thick/2, h/2, 0);
             
-            const leftPanel = new THREE.Mesh(sideGeo, material);
-            leftPanel.position.set(-wm/2 + thickm/2, hm/2, 0);
-            scene.add(leftPanel);
+            // Top/Bottom
+            makeBox(w - thick*2, thick, d, 0, h - thick/2, 0);
+            makeBox(w - thick*2, thick, d, 0, thick/2, 0);
 
-            const rightPanel = new THREE.Mesh(sideGeo, material);
-            rightPanel.position.set(wm/2 - thickm/2, hm/2, 0);
-            scene.add(rightPanel);
-
-            // 2. Create Top and Bottom
-            const hGeo = new THREE.BoxGeometry(wm - (thickm*2), thickm, dm);
-            
-            // Top
-            const topPanel = new THREE.Mesh(hGeo, material);
-            topPanel.position.set(0, hm - thickm/2, 0);
-            scene.add(topPanel);
-
-            // Bottom
-            const bottomPanel = new THREE.Mesh(hGeo, material);
-            bottomPanel.position.set(0, thickm/2, 0);
-            scene.add(bottomPanel);
-
-            // 3. Create Middle Shelves
+            // Shelves
             if (shelvesCount > 0) {
-                // Calculate spacing
-                // Available height for shelves is internal height
-                const internalHeight = hm - (thickm * 2);
-                // Divide by spaces (shelves + 1)
-                const spacing = internalHeight / (shelvesCount + 1);
-
-                for(let i = 1; i <= shelvesCount; i++) {
-                    const shelf = new THREE.Mesh(hGeo, material);
-                    // Position: Bottom thickness + (spacing * i)
-                    const yPos = thickm + (spacing * i);
-                    shelf.position.set(0, yPos, 0);
-                    scene.add(shelf);
+                const space = (h - thick*2) / (shelvesCount + 1);
+                for(let i=1; i<=shelvesCount; i++) {
+                    makeBox(w - thick*2, thick, d, 0, thick + (space * i), 0);
                 }
             }
 
-            // 4. Create Back Panel (Optional, but makes it sturdy)
-            const backGeo = new THREE.BoxGeometry(wm, hm, 0.005); // Thin back
-            const backPanel = new THREE.Mesh(backGeo, material);
-            backPanel.position.set(0, hm/2, -dm/2);
-            scene.add(backPanel);
-
-
-            // EXPORT SCENE TO GLB BLOB
+            log("Exporting to GLB...");
             const exporter = new GLTFExporter();
-            exporter.parse(
-                scene,
-                function (result) {
-                    if (result instanceof ArrayBuffer) {
-                        const blob = new Blob([result], { type: 'application/octet-stream' });
-                        const url = URL.createObjectURL(blob);
-                        
-                        // Update Model Viewer
-                        const viewer = document.getElementById('shelf-viewer');
-                        viewer.src = url;
-                        
-                        // Hide loading
-                        document.getElementById('loading').style.display = 'none';
-                    }
-                },
-                function (error) {
-                    console.error('An error happened during export:', error);
-                    document.getElementById('loading').style.display = 'none';
-                },
-                { binary: true } // Export as .glb (binary)
-            );
+            exporter.parse(scene, function (result) {
+                const blob = new Blob([result], { type: 'application/octet-stream' });
+                const url = URL.createObjectURL(blob);
+                log("Blob URL created: " + url.split('/').pop());
+                
+                const viewer = document.getElementById('shelf-viewer');
+                viewer.src = url;
+                log("Model Viewer updated.");
+            }, function(err) {
+                log("Export Error: " + err);
+            }, { binary: true });
         };
 
-        // Generate default on load
-        window.addEventListener('load', generateShelf);
+        // Listen for AR status
+        const viewer = document.getElementById('shelf-viewer');
+        viewer.addEventListener('ar-status', (event) => {
+            log("AR Status: " + event.detail.status);
+        });
+
+        // Run once
+        window.addEventListener('load', () => {
+            log("Checking AR compatibility...");
+            if (document.createElement('a').relList.supports('ar')) {
+                log("Browser supports AR!");
+            } else {
+                log("Browser might not support standard AR links.");
+            }
+            generateShelf();
+        });
     </script>
 </body>
 </html>
