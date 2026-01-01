@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AR Shelf Designer v2</title>
+    <title>Wall Mounted AR Shelf</title>
     
     <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.3.0/model-viewer.min.js"></script>
 
@@ -17,130 +17,162 @@
     </script>
 
     <style>
-        body { margin: 0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; }
-        #controls { background: white; padding: 15px; border-bottom: 1px solid #ccc; z-index: 10; display: flex; gap: 10px; flex-wrap: wrap; }
-        input { width: 50px; padding: 5px; }
-        button { background: #007bff; color: white; border: none; padding: 8px 15px; border-radius: 4px; }
-        #viewer-container { flex-grow: 1; position: relative; background: #eee; }
-        model-viewer { width: 100%; height: 100%; }
+        body { margin: 0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; background-color: #f0f0f0; }
         
-        /* Debug Console Styles */
-        #debug-console {
-            position: absolute; bottom: 0; left: 0; right: 0;
-            background: rgba(0,0,0,0.8); color: lime; font-family: monospace;
-            padding: 10px; font-size: 12px; height: 100px; overflow-y: auto;
-            pointer-events: none; z-index: 100;
+        /* Control Panel */
+        #controls { 
+            background: white; 
+            padding: 15px; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            z-index: 10; 
+            display: grid; 
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px; 
+        }
+
+        .full-width { grid-column: span 2; }
+        
+        label { font-size: 11px; color: #555; font-weight: bold; display: block; margin-bottom: 2px;}
+        input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        
+        button { 
+            background: #2563eb; 
+            color: white; 
+            border: none; 
+            padding: 12px; 
+            border-radius: 6px; 
+            font-size: 16px;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+
+        #viewer-container { flex-grow: 1; position: relative; }
+        model-viewer { width: 100%; height: 100%; --poster-color: #f0f0f0; }
+        
+        /* Placement Hint */
+        #ar-hint {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.6);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            pointer-events: none;
+            display: none; /* Shown via JS logic if needed */
         }
     </style>
 </head>
 <body>
 
     <div id="controls">
-        H: <input type="number" id="hInput" value="180">
-        W: <input type="number" id="wInput" value="80">
-        D: <input type="number" id="dInput" value="30">
-        Shelves: <input type="number" id="sInput" value="4">
-        <button onclick="generateShelf()">Update Model</button>
+        <div>
+            <label>Shelf Height (cm)</label>
+            <input type="number" id="hInput" value="60">
+        </div>
+        <div>
+            <label>Shelf Width (cm)</label>
+            <input type="number" id="wInput" value="80">
+        </div>
+        <div>
+            <label>Shelf Depth (cm)</label>
+            <input type="number" id="dInput" value="25">
+        </div>
+        <div>
+            <label>Number of Shelves</label>
+            <input type="number" id="sInput" value="1">
+        </div>
+        
+        <div class="full-width" style="background: #eef2ff; padding: 5px; border-radius: 4px; border: 1px dashed #2563eb;">
+            <label style="color: #2563eb;">Elevation from Floor (cm)</label>
+            <input type="number" id="elevationInput" value="120" style="border-color: #2563eb;">
+        </div>
+
+        <button class="full-width" onclick="generateShelf()">Generate Shelf</button>
     </div>
 
     <div id="viewer-container">
+        <div id="ar-hint">Point camera at floor to detect height</div>
         <model-viewer 
             id="shelf-viewer"
             src="" 
             ar 
+            ar-placement="floor"
             ar-modes="webxr scene-viewer quick-look" 
             camera-controls 
             shadow-intensity="1"
             auto-rotate>
-            
-            <button slot="ar-button" style="background-color: white; border-radius: 4px; border: none; position: absolute; top: 16px; right: 16px; height: 36px; padding: 0 16px;">
-                👋 Activate AR
-            </button>
         </model-viewer>
-        
-        <div id="debug-console">System Ready...<br></div>
     </div>
 
     <script type="module">
         import * as THREE from 'three';
         import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 
-        // Custom Logger
-        function log(msg) {
-            const c = document.getElementById('debug-console');
-            c.innerHTML += `> ${msg}<br>`;
-            c.scrollTop = c.scrollHeight;
-            console.log(msg);
-        }
-
         const scene = new THREE.Scene();
-        const material = new THREE.MeshStandardMaterial({ color: 0x8B5A2B });
+        // Lighter wood color for visibility
+        const material = new THREE.MeshStandardMaterial({ color: 0xD2B48C, roughness: 0.5 });
 
         window.generateShelf = function() {
-            log("Generating geometry...");
-            const h = parseFloat(document.getElementById('hInput').value) / 100;
+            // 1. Get Inputs
+            const h = parseFloat(document.getElementById('hInput').value) / 100; // convert cm to m
             const w = parseFloat(document.getElementById('wInput').value) / 100;
             const d = parseFloat(document.getElementById('dInput').value) / 100;
+            const elevation = parseFloat(document.getElementById('elevationInput').value) / 100; // Elevation in m
             const shelvesCount = parseInt(document.getElementById('sInput').value);
-            const thick = 0.02;
+            const thick = 0.02; // 2cm thickness
 
             scene.clear();
 
-            // Helper to make box
-            function makeBox(bx, by, bz, x, y, z) {
+            // 2. Helper function to create parts
+            // We add 'elevation' to every Y coordinate so the whole structure shifts up
+            function createPart(bx, by, bz, x, y, z) {
                 const geo = new THREE.BoxGeometry(bx, by, bz);
                 const mesh = new THREE.Mesh(geo, material);
-                mesh.position.set(x, y, z);
+                // Important: Add elevation to the Y position
+                mesh.position.set(x, y + elevation, z);
                 scene.add(mesh);
             }
 
-            // Sides
-            makeBox(thick, h, d, -w/2 + thick/2, h/2, 0);
-            makeBox(thick, h, d, w/2 - thick/2, h/2, 0);
-            
-            // Top/Bottom
-            makeBox(w - thick*2, thick, d, 0, h - thick/2, 0);
-            makeBox(w - thick*2, thick, d, 0, thick/2, 0);
+            // --- BUILD THE SHELF ---
 
-            // Shelves
+            // Side Panels (Left & Right)
+            // Their center Y is at h/2
+            createPart(thick, h, d, -w/2 + thick/2, h/2, 0);
+            createPart(thick, h, d, w/2 - thick/2, h/2, 0);
+
+            // Top Panel
+            createPart(w - thick*2, thick, d, 0, h - thick/2, 0);
+
+            // Bottom Panel
+            createPart(w - thick*2, thick, d, 0, thick/2, 0);
+
+            // Middle Shelves
             if (shelvesCount > 0) {
-                const space = (h - thick*2) / (shelvesCount + 1);
-                for(let i=1; i<=shelvesCount; i++) {
-                    makeBox(w - thick*2, thick, d, 0, thick + (space * i), 0);
+                const internalHeight = h - (thick * 2);
+                const spacing = internalHeight / (shelvesCount + 1);
+                for(let i = 1; i <= shelvesCount; i++) {
+                    createPart(w - thick*2, thick, d, 0, thick + (spacing * i), 0);
                 }
             }
 
-            log("Exporting to GLB...");
+            // Back Panel (Thin)
+            createPart(w, h, 0.005, 0, h/2, -d/2);
+
+
+            // 3. EXPORT
             const exporter = new GLTFExporter();
             exporter.parse(scene, function (result) {
                 const blob = new Blob([result], { type: 'application/octet-stream' });
                 const url = URL.createObjectURL(blob);
-                log("Blob URL created: " + url.split('/').pop());
-                
-                const viewer = document.getElementById('shelf-viewer');
-                viewer.src = url;
-                log("Model Viewer updated.");
-            }, function(err) {
-                log("Export Error: " + err);
+                document.getElementById('shelf-viewer').src = url;
             }, { binary: true });
         };
 
-        // Listen for AR status
-        const viewer = document.getElementById('shelf-viewer');
-        viewer.addEventListener('ar-status', (event) => {
-            log("AR Status: " + event.detail.status);
-        });
-
-        // Run once
-        window.addEventListener('load', () => {
-            log("Checking AR compatibility...");
-            if (document.createElement('a').relList.supports('ar')) {
-                log("Browser supports AR!");
-            } else {
-                log("Browser might not support standard AR links.");
-            }
-            generateShelf();
-        });
+        // Initialize on load
+        window.addEventListener('load', generateShelf);
     </script>
 </body>
 </html>
