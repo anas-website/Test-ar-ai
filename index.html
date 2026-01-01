@@ -2,454 +2,252 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>3D AR Shelf Designer</title>
-    <!-- Tailwind CSS for styling -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { margin: 0; overflow: hidden; background-color: #1a1a1a; color: white; font-family: sans-serif; }
-        #ar-button {
-            display: none; /* Hidden by default, shown via JS if supported */
-        }
-        /* Custom scrollbar for controls */
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #333; }
-        ::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
-        
-        .control-group { margin-bottom: 12px; }
-        .control-label { display: flex; justify-content: space-between; font-size: 0.85rem; color: #aaa; margin-bottom: 4px; }
-        .slider { width: 100%; height: 6px; background: #444; outline: none; -webkit-appearance: none; border-radius: 3px; }
-        .slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; background: #3b82f6; border-radius: 50%; cursor: pointer; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Shelf Designer</title>
     
-    <!-- Import Map for Three.js -->
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.3.0/model-viewer.min.js"></script>
+
     <script type="importmap">
         {
             "imports": {
-                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
             }
         }
     </script>
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            background-color: #f5f5f5;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* UI Panel Styles */
+        #controls {
+            background: white;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 10;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: flex-end;
+            justify-content: center;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        label {
+            font-size: 12px;
+            font-weight: bold;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 80px;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        /* AR Viewer Styles */
+        #viewer-container {
+            flex-grow: 1;
+            position: relative;
+            background: #eee;
+        }
+
+        model-viewer {
+            width: 100%;
+            height: 100%;
+            background-color: #e0e0e0;
+            --poster-color: #e0e0e0;
+        }
+
+        /* Loading Overlay */
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: none;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+        }
+    </style>
 </head>
 <body>
 
-    <!-- UI Overlay -->
-    <div id="ui-panel" class="absolute top-0 left-0 p-4 w-full sm:w-80 max-h-screen overflow-y-auto bg-black/80 backdrop-blur-md border-r border-white/10 z-10 transition-transform duration-300">
-        <h1 class="text-xl font-bold mb-4 text-blue-400 flex items-center gap-2">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-            Shelf Designer
-        </h1>
-        
-        <div class="control-group">
-            <div class="control-label"><span>Height (cm)</span><span id="val-height">180</span></div>
-            <input type="range" id="input-height" min="50" max="300" value="180" class="slider">
+    <div id="controls">
+        <div class="input-group">
+            <label>Height (cm)</label>
+            <input type="number" id="hInput" value="180">
         </div>
-
-        <div class="control-group">
-            <div class="control-label"><span>Width (cm)</span><span id="val-width">100</span></div>
-            <input type="range" id="input-width" min="40" max="250" value="100" class="slider">
+        <div class="input-group">
+            <label>Width (cm)</label>
+            <input type="number" id="wInput" value="80">
         </div>
-
-        <div class="control-group">
-            <div class="control-label"><span>Depth (cm)</span><span id="val-depth">30</span></div>
-            <input type="range" id="input-depth" min="15" max="60" value="30" class="slider">
+        <div class="input-group">
+            <label>Depth (cm)</label>
+            <input type="number" id="dInput" value="30">
         </div>
-
-        <div class="control-group">
-            <div class="control-label"><span>Shelves</span><span id="val-shelves">4</span></div>
-            <input type="range" id="input-shelves" min="1" max="10" value="4" class="slider">
+        <div class="input-group">
+            <label>Shelves</label>
+            <input type="number" id="sInput" value="4">
         </div>
-        
-        <div class="control-group">
-            <div class="control-label"><span>Material Option</span></div>
-            <div class="flex gap-2 mt-2">
-                <button onclick="setMaterial('#e8c39e', 'wood')" class="w-8 h-8 rounded-full border-2 border-white/20 hover:scale-110 transition bg-[#e8c39e]" title="Light Wood"></button>
-                <button onclick="setMaterial('#8B5A2B', 'wood')" class="w-8 h-8 rounded-full border-2 border-white/20 hover:scale-110 transition bg-[#8B5A2B]" title="Medium Wood"></button>
-                <button onclick="setMaterial('#5D4037', 'wood')" class="w-8 h-8 rounded-full border-2 border-white/20 hover:scale-110 transition bg-[#5D4037]" title="Dark Wood"></button>
-                <button onclick="setMaterial('#222222', 'solid')" class="w-8 h-8 rounded-full border-2 border-white/20 hover:scale-110 transition bg-[#222222]" title="Black Metal"></button>
-                <button onclick="setMaterial('#eeeeee', 'solid')" class="w-8 h-8 rounded-full border-2 border-white/20 hover:scale-110 transition bg-[#eeeeee]" title="White"></button>
-            </div>
-        </div>
-
-        <div class="mt-4 p-3 bg-blue-900/30 border border-blue-500/30 rounded text-xs text-blue-200">
-            <p><strong>AR Instructions:</strong></p>
-            <ol class="list-decimal ml-4 mt-1 space-y-1">
-                <li>Click "Start AR".</li>
-                <li>Point camera at the floor and move slowly to detect surface.</li>
-                <li>When the white ring appears, tap screen to place shelf.</li>
-            </ol>
-        </div>
+        <button onclick="generateShelf()">Generate & Update AR</button>
     </div>
 
-    <!-- Toggle UI Button (for mobile) -->
-    <button id="toggle-ui" class="absolute top-4 right-4 z-20 bg-white/10 backdrop-blur p-2 rounded-full text-white sm:hidden">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg>
-    </button>
-
-    <!-- 3D Container -->
-    <div id="canvas-container" class="w-full h-screen block"></div>
+    <div id="viewer-container">
+        <div id="loading">Generating 3D Model...</div>
+        
+        <model-viewer 
+            id="shelf-viewer"
+            src="" 
+            ar 
+            ar-modes="webxr scene-viewer quick-look" 
+            camera-controls 
+            shadow-intensity="1"
+            environment-image="neutral" 
+            auto-rotate>
+        </model-viewer>
+    </div>
 
     <script type="module">
         import * as THREE from 'three';
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import { ARButton } from 'three/addons/webxr/ARButton.js';
+        import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 
-        let container;
-        let camera, scene, renderer;
-        let controller;
-        let reticle;
-        let hitTestSource = null;
-        let hitTestSourceRequested = false;
-        let shelfGroup; // The object that holds all shelf parts
-        let currentMaterial, woodMaterial, solidMaterial;
-        let woodTextures = {};
+        // Initialize Three.js variables (offscreen)
+        const scene = new THREE.Scene();
+        // Wood Material
+        const material = new THREE.MeshStandardMaterial({ 
+            color: 0x8B5A2B, // Saddle Brown
+            roughness: 0.6,
+            metalness: 0.1
+        });
 
-        // Texture URLs (using reliable examples from three.js repo)
-        const textureUrls = {
-            diffuse: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/hardwood2_diffuse.jpg',
-            roughness: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/hardwood2_roughness.jpg',
-            normal: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/hardwood2_normal.jpg'
-        };
-
-        // Configuration
-        const config = {
-            height: 180,
-            width: 100,
-            depth: 30,
-            shelves: 4,
-            thickness: 2.5, // cm
-            color: '#8B5A2B',
-            materialType: 'wood'
-        };
-
-        // UI Elements
-        const uiPanel = document.getElementById('ui-panel');
-        const toggleBtn = document.getElementById('toggle-ui');
-        
-        init();
-        animate();
-
-        function init() {
-            container = document.createElement('div');
-            document.getElementById('canvas-container').appendChild(container);
-
-            scene = new THREE.Scene();
-            // Background is transparent for AR, gray for 3D view
-            scene.background = new THREE.Color(0x202020);
-
-            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
-            camera.position.set(0, 1.6, 3); // Start at human eye level-ish looking at origin
-
-            // Lighting
-            const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-            hemisphereLight.position.set(0.5, 1, 0.25);
-            scene.add(hemisphereLight);
-
-            const light = new THREE.DirectionalLight(0xffffff, 3.5);
-            light.position.set(0, 5, 2);
-            light.castShadow = true;
-            light.shadow.mapSize.width = 1024;
-            light.shadow.mapSize.height = 1024;
-            light.shadow.camera.near = 0.1;
-            light.shadow.camera.far = 10;
-            scene.add(light);
-
-            // Renderer
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.xr.enabled = true; // Enable WebXR
-            renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-            renderer.outputColorSpace = THREE.SRGBColorSpace; // Important for correct color rendering with textures
-            container.appendChild(renderer.domElement);
-
-            // Orbit Controls (for non-AR view)
-            const controls = new OrbitControls(camera, renderer.domElement);
-            controls.target.set(0, 1, 0);
-            controls.update();
-
-            // AR Button
-            const arButton = ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] });
-            document.body.appendChild(arButton);
+        window.generateShelf = function() {
+            const h = parseFloat(document.getElementById('hInput').value); // cm
+            const w = parseFloat(document.getElementById('wInput').value); // cm
+            const d = parseFloat(document.getElementById('dInput').value); // cm
+            const shelvesCount = parseInt(document.getElementById('sInput').value);
             
-            // Handle AR Session Start/End for UI visibility
-            renderer.xr.addEventListener('sessionstart', () => {
-                uiPanel.style.display = 'none'; // Hide editor in AR to clean view
-                scene.background = null; // Transparent background for camera feed
-            });
-            renderer.xr.addEventListener('sessionend', () => {
-                uiPanel.style.display = 'block';
-                scene.background = new THREE.Color(0x202020);
-                // Reset shelf position for editor view
-                shelfGroup.position.set(0, 0, 0);
-                shelfGroup.scale.set(1,1,1);
-                shelfGroup.visible = true;
-            });
+            const thickness = 2; // 2cm thickness for wood
+            
+            // Show loading
+            document.getElementById('loading').style.display = 'block';
 
-            // Load Textures
-            const textureLoader = new THREE.TextureLoader();
-            woodTextures.diffuse = textureLoader.load(textureUrls.diffuse);
-            woodTextures.roughness = textureLoader.load(textureUrls.roughness);
-            woodTextures.normal = textureLoader.load(textureUrls.normal);
+            // Convert cm to meters for AR scale (1 unit = 1 meter usually in AR)
+            // But Model Viewer handles units well. We will work in units = cm, then scale down if needed.
+            // Actually, glTF defaults to meters. So let's convert inputs to meters.
+            const hm = h / 100;
+            const wm = w / 100;
+            const dm = d / 100;
+            const thickm = thickness / 100;
 
-            // Configure textures for tiling
-            [woodTextures.diffuse, woodTextures.roughness, woodTextures.normal].forEach(tex => {
-                tex.wrapS = THREE.RepeatWrapping;
-                tex.wrapT = THREE.RepeatWrapping;
-                tex.colorSpace = THREE.SRGBColorSpace; // Ensure correct color space for diffuse maps
-            });
-            // Normal and roughness maps should be linear
-            woodTextures.roughness.colorSpace = THREE.NoColorSpace;
-            woodTextures.normal.colorSpace = THREE.NoColorSpace;
+            // Clear previous mesh
+            scene.clear();
+
+            // 1. Create Side Panels (Left & Right)
+            const sideGeo = new THREE.BoxGeometry(thickm, hm, dm);
+            
+            const leftPanel = new THREE.Mesh(sideGeo, material);
+            leftPanel.position.set(-wm/2 + thickm/2, hm/2, 0);
+            scene.add(leftPanel);
+
+            const rightPanel = new THREE.Mesh(sideGeo, material);
+            rightPanel.position.set(wm/2 - thickm/2, hm/2, 0);
+            scene.add(rightPanel);
+
+            // 2. Create Top and Bottom
+            const hGeo = new THREE.BoxGeometry(wm - (thickm*2), thickm, dm);
+            
+            // Top
+            const topPanel = new THREE.Mesh(hGeo, material);
+            topPanel.position.set(0, hm - thickm/2, 0);
+            scene.add(topPanel);
+
+            // Bottom
+            const bottomPanel = new THREE.Mesh(hGeo, material);
+            bottomPanel.position.set(0, thickm/2, 0);
+            scene.add(bottomPanel);
+
+            // 3. Create Middle Shelves
+            if (shelvesCount > 0) {
+                // Calculate spacing
+                // Available height for shelves is internal height
+                const internalHeight = hm - (thickm * 2);
+                // Divide by spaces (shelves + 1)
+                const spacing = internalHeight / (shelvesCount + 1);
+
+                for(let i = 1; i <= shelvesCount; i++) {
+                    const shelf = new THREE.Mesh(hGeo, material);
+                    // Position: Bottom thickness + (spacing * i)
+                    const yPos = thickm + (spacing * i);
+                    shelf.position.set(0, yPos, 0);
+                    scene.add(shelf);
+                }
+            }
+
+            // 4. Create Back Panel (Optional, but makes it sturdy)
+            const backGeo = new THREE.BoxGeometry(wm, hm, 0.005); // Thin back
+            const backPanel = new THREE.Mesh(backGeo, material);
+            backPanel.position.set(0, hm/2, -dm/2);
+            scene.add(backPanel);
 
 
-            // Initialize Materials
-            // 1. Wood Material (with textures)
-            woodMaterial = new THREE.MeshStandardMaterial({ 
-                name: 'woodMaterial',
-                color: config.color, // This will tint the texture
-                map: woodTextures.diffuse,
-                roughnessMap: woodTextures.roughness,
-                normalMap: woodTextures.normal,
-                roughness: 0.8,
-                metalness: 0.0
-            });
-
-            // 2. Solid Material (no textures, for plain colors)
-            solidMaterial = new THREE.MeshStandardMaterial({
-                name: 'solidMaterial',
-                color: '#ffffff',
-                roughness: 0.6,
-                metalness: 0.1
-            });
-
-            // Set initial material based on config
-            currentMaterial = config.materialType === 'wood' ? woodMaterial : solidMaterial;
-            if (config.materialType === 'wood') woodMaterial.color.set(config.color);
-
-            // Build initial Shelf
-            shelfGroup = new THREE.Group();
-            scene.add(shelfGroup);
-            // Wait for textures to load before first build to avoid visual glitches
-            const loadingManager = new THREE.LoadingManager(() => {
-                updateShelfGeometry();
-            });
-            textureLoader.manager = loadingManager;
-
-
-            // AR Reticle (The targeting ring)
-            reticle = new THREE.Mesh(
-                new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2),
-                new THREE.MeshBasicMaterial()
+            // EXPORT SCENE TO GLB BLOB
+            const exporter = new GLTFExporter();
+            exporter.parse(
+                scene,
+                function (result) {
+                    if (result instanceof ArrayBuffer) {
+                        const blob = new Blob([result], { type: 'application/octet-stream' });
+                        const url = URL.createObjectURL(blob);
+                        
+                        // Update Model Viewer
+                        const viewer = document.getElementById('shelf-viewer');
+                        viewer.src = url;
+                        
+                        // Hide loading
+                        document.getElementById('loading').style.display = 'none';
+                    }
+                },
+                function (error) {
+                    console.error('An error happened during export:', error);
+                    document.getElementById('loading').style.display = 'none';
+                },
+                { binary: true } // Export as .glb (binary)
             );
-            reticle.matrixAutoUpdate = false;
-            reticle.visible = false;
-            scene.add(reticle);
+        };
 
-            // AR Input Controller (Tap to place)
-            controller = renderer.xr.getController(0);
-            controller.addEventListener('select', onSelect);
-            scene.add(controller);
-
-            // Window Resize
-            window.addEventListener('resize', onWindowResize);
-
-            // UI Event Listeners
-            setupUI();
-        }
-
-        function setupUI() {
-            const inputs = ['height', 'width', 'depth', 'shelves'];
-            
-            inputs.forEach(id => {
-                const el = document.getElementById(`input-${id}`);
-                const display = document.getElementById(`val-${id}`);
-                
-                el.addEventListener('input', (e) => {
-                    config[id] = parseInt(e.target.value);
-                    display.innerText = config[id];
-                    updateShelfGeometry();
-                });
-            });
-
-            // Updated setMaterial function to handle material type
-            window.setMaterial = (color, type) => {
-                config.color = color;
-                config.materialType = type;
-
-                if (type === 'wood') {
-                    currentMaterial = woodMaterial;
-                    woodMaterial.color.set(color); // Tint the wood texture
-                } else {
-                    currentMaterial = solidMaterial;
-                    solidMaterial.color.set(color);
-                    // Roughness tweak for metal vs white look
-                    if(color === '#222222') { // Black Metal
-                        solidMaterial.roughness = 0.2;
-                        solidMaterial.metalness = 0.8;
-                    } else { // White/Other
-                        solidMaterial.roughness = 0.6;
-                        solidMaterial.metalness = 0.1;
-                    }
-                }
-                updateShelfGeometry();
-            };
-
-            // Mobile toggle
-            toggleBtn.addEventListener('click', () => {
-                uiPanel.classList.toggle('-translate-x-full');
-            });
-        }
-
-        function updateShelfGeometry() {
-            // Remove old children
-            while(shelfGroup.children.length > 0){ 
-                const child = shelfGroup.children[0];
-                // Dispose geometry and material to prevent memory leaks
-                if (child.geometry) child.geometry.dispose();
-                if (child.material) {
-                    // Only dispose if it's a cloned material instance
-                    if (child.material.name.includes('cloned')) {
-                        child.material.dispose();
-                    }
-                }
-                shelfGroup.remove(child); 
-            }
-
-            // Convert CM to Meters (WebXR uses meters)
-            const h = config.height / 100;
-            const w = config.width / 100;
-            const d = config.depth / 100;
-            const t = (config.thickness / 100); 
-
-            // Helper to create box with smart texture scaling
-            const createBox = (width, height, depth, x, y, z) => {
-                const geometry = new THREE.BoxGeometry(width, height, depth);
-                let material = currentMaterial;
-
-                // If using wood material, we must clone it per-mesh to adjust texture repeat
-                // so the grain doesn't look stretched on differently sized pieces.
-                if (currentMaterial.name === 'woodMaterial') {
-                    material = currentMaterial.clone();
-                    material.name = 'woodMaterial-cloned'; // Mark for disposal
-                    
-                    const textureScale = 3.0; // Adjust density of wood grain
-
-                    // BoxGeometry UV mapping is complex (different faces use different dimensions).
-                    // A simple approximation is to scale repeats based on the largest dimensions
-                    // of the piece to maintain a roughly consistent density.
-                    // For vertical pieces (sides), scale by depth & height.
-                    // For horizontal pieces (shelves, top/bottom), scale by width & depth.
-                    
-                    let repeatX, repeatY;
-                    if (height > width && height > depth) {
-                        // Vertical piece pattern
-                        repeatX = depth * textureScale;
-                        repeatY = height * textureScale;
-                    } else {
-                        // Horizontal piece pattern
-                        repeatX = width * textureScale;
-                        repeatY = depth * textureScale;
-                    }
-
-                    material.map.repeat.set(repeatX, repeatY);
-                    material.roughnessMap.repeat.set(repeatX, repeatY);
-                    material.normalMap.repeat.set(repeatX, repeatY);
-                }
-
-                const mesh = new THREE.Mesh(geometry, material);
-                mesh.position.set(x, y, z);
-                mesh.castShadow = true;
-                mesh.receiveShadow = true;
-                return mesh;
-            };
-
-            // 1. Left Panel
-            shelfGroup.add(createBox(t, h, d, -(w/2) + (t/2), h/2, 0));
-            
-            // 2. Right Panel
-            shelfGroup.add(createBox(t, h, d, (w/2) - (t/2), h/2, 0));
-
-            // 3. Top Panel
-            shelfGroup.add(createBox(w - (2*t), t, d, 0, h - (t/2), 0));
-            
-            // 4. Bottom Panel
-            shelfGroup.add(createBox(w - (2*t), t, d, 0, t/2, 0));
-
-            // 5. Adjustable Shelves
-            // Available height inside
-            const innerH = h - (2*t);
-            // Number of spaces is shelves + 1
-            const spacing = innerH / (config.shelves + 1);
-
-            for(let i = 1; i <= config.shelves; i++) {
-                const yPos = (spacing * i) + t; // Offset by bottom thickness
-                shelfGroup.add(createBox(w - (2*t), t, d, 0, yPos, 0));
-            }
-        }
-
-        function onSelect() {
-            if (reticle.visible) {
-                // In AR mode, when tapping, move the shelf to the reticle
-                shelfGroup.position.setFromMatrixPosition(reticle.matrix);
-                // Rotate to face camera roughly? Or keep reticle rotation?
-                // Using reticle rotation aligns it with the hit surface (usually flat floor)
-                // We just want to preserve the Y-rotation (yaw) relative to user maybe?
-                // For now, simple placement:
-                shelfGroup.quaternion.setFromRotationMatrix(reticle.matrix);
-                
-                // Ensure it's visible
-                shelfGroup.visible = true;
-            }
-        }
-
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        function animate() {
-            renderer.setAnimationLoop(render);
-        }
-
-        function render(timestamp, frame) {
-            if (frame) {
-                // ---------------- AR LOGIC ----------------
-                const referenceSpace = renderer.xr.getReferenceSpace();
-                const session = renderer.xr.getSession();
-
-                if (hitTestSourceRequested === false) {
-                    session.requestReferenceSpace('viewer').then((referenceSpace) => {
-                        session.requestHitTestSource({ space: referenceSpace }).then((source) => {
-                            hitTestSource = source;
-                        });
-                    });
-                    session.addEventListener('end', () => {
-                        hitTestSourceRequested = false;
-                        hitTestSource = null;
-                    });
-                    hitTestSourceRequested = true;
-                }
-
-                if (hitTestSource) {
-                    const hitTestResults = frame.getHitTestResults(hitTestSource);
-
-                    if (hitTestResults.length > 0) {
-                        const hit = hitTestResults[0];
-                        reticle.visible = true;
-                        reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
-                    } else {
-                        reticle.visible = false;
-                    }
-                }
-            }
-
-            renderer.render(scene, camera);
-        }
-
+        // Generate default on load
+        window.addEventListener('load', generateShelf);
     </script>
 </body>
 </html>
