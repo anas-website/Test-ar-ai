@@ -3,9 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wall Mounted AR Shelf</title>
+    <title>AR Shelf - Debug Mode</title>
     
     <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.3.0/model-viewer.min.js"></script>
+
+    <style>
+        body { margin: 0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; background: #f0f0f0; }
+        
+        /* STATUS LOG - To see errors */
+        #status-log {
+            background: #222;
+            color: #0f0;
+            font-family: monospace;
+            padding: 10px;
+            font-size: 12px;
+            height: 60px;
+            overflow-y: auto;
+            border-bottom: 2px solid #555;
+        }
+
+        #controls { padding: 15px; background: white; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .full { grid-column: span 2; }
+        input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; }
+        label { font-size: 11px; font-weight: bold; color: #555; display: block; }
+        
+        button { 
+            background: #007bff; color: white; border: none; padding: 12px; 
+            font-size: 16px; border-radius: 6px; cursor: pointer;
+        }
+        button:disabled { background: #ccc; }
+
+        #viewer-container { flex-grow: 1; position: relative; background: #e0e0e0; }
+        model-viewer { width: 100%; height: 100%; }
+    </style>
 
     <script type="importmap">
         {
@@ -15,92 +45,34 @@
             }
         }
     </script>
-
-    <style>
-        body { margin: 0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; background-color: #f0f0f0; }
-        
-        /* Control Panel */
-        #controls { 
-            background: white; 
-            padding: 15px; 
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-            z-index: 10; 
-            display: grid; 
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px; 
-        }
-
-        .full-width { grid-column: span 2; }
-        
-        label { font-size: 11px; color: #555; font-weight: bold; display: block; margin-bottom: 2px;}
-        input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-        
-        button { 
-            background: #2563eb; 
-            color: white; 
-            border: none; 
-            padding: 12px; 
-            border-radius: 6px; 
-            font-size: 16px;
-            font-weight: bold;
-            margin-top: 5px;
-        }
-
-        #viewer-container { flex-grow: 1; position: relative; }
-        model-viewer { width: 100%; height: 100%; --poster-color: #f0f0f0; }
-        
-        /* Placement Hint */
-        #ar-hint {
-            position: absolute;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0,0,0,0.6);
-            color: white;
-            padding: 8px 15px;
-            border-radius: 20px;
-            font-size: 12px;
-            pointer-events: none;
-            display: none; /* Shown via JS logic if needed */
-        }
-    </style>
 </head>
 <body>
+
+    <div id="status-log">System initializing...</div>
 
     <div id="controls">
         <div>
             <label>Shelf Height (cm)</label>
-            <input type="number" id="hInput" value="60">
+            <input type="number" id="hInput" value="100">
         </div>
         <div>
             <label>Shelf Width (cm)</label>
             <input type="number" id="wInput" value="80">
         </div>
-        <div>
-            <label>Shelf Depth (cm)</label>
-            <input type="number" id="dInput" value="25">
+        <div class="full">
+            <label style="color:blue">Elevation from Floor (cm)</label>
+            <input type="number" id="elInput" value="100">
         </div>
-        <div>
-            <label>Number of Shelves</label>
-            <input type="number" id="sInput" value="1">
-        </div>
-        
-        <div class="full-width" style="background: #eef2ff; padding: 5px; border-radius: 4px; border: 1px dashed #2563eb;">
-            <label style="color: #2563eb;">Elevation from Floor (cm)</label>
-            <input type="number" id="elevationInput" value="120" style="border-color: #2563eb;">
-        </div>
-
-        <button class="full-width" onclick="generateShelf()">Generate Shelf</button>
+        <button class="full" id="genBtn" onclick="generateShelf()" disabled>Loading Libraries...</button>
     </div>
 
     <div id="viewer-container">
-        <div id="ar-hint">Point camera at floor to detect height</div>
         <model-viewer 
-            id="shelf-viewer"
+            id="shelf-viewer" 
             src="" 
             ar 
-            ar-placement="floor"
             ar-modes="webxr scene-viewer quick-look" 
+            ar-placement="floor"
             camera-controls 
             shadow-intensity="1"
             auto-rotate>
@@ -108,71 +80,99 @@
     </div>
 
     <script type="module">
-        import * as THREE from 'three';
-        import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+        // Helper to log messages to screen
+        function log(msg, isError = false) {
+            const el = document.getElementById('status-log');
+            el.innerHTML += `<br>${isError ? '❌ ' : '✅ '}${msg}`;
+            el.scrollTop = el.scrollHeight;
+            if(isError) console.error(msg); else console.log(msg);
+        }
 
-        const scene = new THREE.Scene();
-        // Lighter wood color for visibility
-        const material = new THREE.MeshStandardMaterial({ color: 0xD2B48C, roughness: 0.5 });
+        log("Starting script...");
 
+        let THREE, GLTFExporter;
+
+        try {
+            // Import Three.js dynamically
+            THREE = await import('three');
+            log("Three.js loaded.");
+            
+            const ExporterModule = await import('three/addons/exporters/GLTFExporter.js');
+            GLTFExporter = ExporterModule.GLTFExporter;
+            log("GLTF Exporter loaded.");
+
+            // Enable button
+            document.getElementById('genBtn').disabled = false;
+            document.getElementById('genBtn').innerText = "Generate Shelf";
+            
+            // Auto-generate first time
+            setTimeout(window.generateShelf, 500);
+
+        } catch (e) {
+            log("CRITICAL ERROR: " + e.message, true);
+            alert("Failed to load libraries. Check internet connection.");
+        }
+
+        // --- GENERATION LOGIC ---
         window.generateShelf = function() {
-            // 1. Get Inputs
-            const h = parseFloat(document.getElementById('hInput').value) / 100; // convert cm to m
-            const w = parseFloat(document.getElementById('wInput').value) / 100;
-            const d = parseFloat(document.getElementById('dInput').value) / 100;
-            const elevation = parseFloat(document.getElementById('elevationInput').value) / 100; // Elevation in m
-            const shelvesCount = parseInt(document.getElementById('sInput').value);
-            const thick = 0.02; // 2cm thickness
-
-            scene.clear();
-
-            // 2. Helper function to create parts
-            // We add 'elevation' to every Y coordinate so the whole structure shifts up
-            function createPart(bx, by, bz, x, y, z) {
-                const geo = new THREE.BoxGeometry(bx, by, bz);
-                const mesh = new THREE.Mesh(geo, material);
-                // Important: Add elevation to the Y position
-                mesh.position.set(x, y + elevation, z);
-                scene.add(mesh);
+            if (!THREE || !GLTFExporter) {
+                log("Libraries not ready yet.", true);
+                return;
             }
 
-            // --- BUILD THE SHELF ---
+            try {
+                log("Building 3D Model...");
+                
+                const scene = new THREE.Scene();
+                const material = new THREE.MeshStandardMaterial({ color: 0x8B5A2B }); // Wood color
 
-            // Side Panels (Left & Right)
-            // Their center Y is at h/2
-            createPart(thick, h, d, -w/2 + thick/2, h/2, 0);
-            createPart(thick, h, d, w/2 - thick/2, h/2, 0);
+                // Get Inputs
+                const h = parseFloat(document.getElementById('hInput').value) / 100;
+                const w = parseFloat(document.getElementById('wInput').value) / 100;
+                const elevation = parseFloat(document.getElementById('elInput').value) / 100;
+                const d = 0.3; // Depth fixed at 30cm for simplicity
+                const thick = 0.02;
 
-            // Top Panel
-            createPart(w - thick*2, thick, d, 0, h - thick/2, 0);
-
-            // Bottom Panel
-            createPart(w - thick*2, thick, d, 0, thick/2, 0);
-
-            // Middle Shelves
-            if (shelvesCount > 0) {
-                const internalHeight = h - (thick * 2);
-                const spacing = internalHeight / (shelvesCount + 1);
-                for(let i = 1; i <= shelvesCount; i++) {
-                    createPart(w - thick*2, thick, d, 0, thick + (spacing * i), 0);
+                // Function to add box
+                function addBox(bx, by, bz, x, y, z) {
+                    const geo = new THREE.BoxGeometry(bx, by, bz);
+                    const mesh = new THREE.Mesh(geo, material);
+                    // Y + Elevation to float it
+                    mesh.position.set(x, y + elevation, z);
+                    scene.add(mesh);
                 }
+
+                // Left Panel
+                addBox(thick, h, d, -w/2 + thick/2, h/2, 0);
+                // Right Panel
+                addBox(thick, h, d, w/2 - thick/2, h/2, 0);
+                // Top
+                addBox(w - thick*2, thick, d, 0, h - thick/2, 0);
+                // Bottom
+                addBox(w - thick*2, thick, d, 0, thick/2, 0);
+                // Back
+                addBox(w, h, 0.005, 0, h/2, -d/2);
+
+                log("Model built. Exporting...");
+
+                // Export
+                const exporter = new GLTFExporter();
+                exporter.parse(scene, function (result) {
+                    const blob = new Blob([result], { type: 'application/octet-stream' });
+                    const url = URL.createObjectURL(blob);
+                    
+                    const viewer = document.getElementById('shelf-viewer');
+                    viewer.src = url;
+                    
+                    log("Displaying in Viewer.");
+                }, function(err) {
+                    log("Export error: " + err, true);
+                }, { binary: true });
+
+            } catch (err) {
+                log("Generation Error: " + err.message, true);
             }
-
-            // Back Panel (Thin)
-            createPart(w, h, 0.005, 0, h/2, -d/2);
-
-
-            // 3. EXPORT
-            const exporter = new GLTFExporter();
-            exporter.parse(scene, function (result) {
-                const blob = new Blob([result], { type: 'application/octet-stream' });
-                const url = URL.createObjectURL(blob);
-                document.getElementById('shelf-viewer').src = url;
-            }, { binary: true });
         };
-
-        // Initialize on load
-        window.addEventListener('load', generateShelf);
     </script>
 </body>
 </html>
