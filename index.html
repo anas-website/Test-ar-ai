@@ -3,60 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AR Shelf - Wall Mount</title>
+    <title>AR Wall Shelf</title>
     
     <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.3.0/model-viewer.min.js"></script>
 
     <style>
-        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; flex-direction: column; height: 100vh; background: #f5f5f5; }
+        body { font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #f4f4f4; }
         
-        /* Debug Box */
-        #ar-status {
-            background: #ffecb3;
-            color: #663c00;
-            padding: 10px;
-            font-size: 13px;
-            text-align: center;
-            border-bottom: 1px solid #e6cfa2;
+        /* ERROR SCREEN */
+        #error-screen {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: #ffebee; color: #b71c1c; padding: 20px; z-index: 9999;
+            flex-direction: column; justify-content: center; align-items: center; text-align: center;
         }
 
-        #controls { padding: 15px; background: white; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; border-bottom: 1px solid #ddd; }
+        #controls { padding: 15px; background: white; border-bottom: 1px solid #ccc; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .full { grid-column: span 2; }
-        label { font-size: 11px; font-weight: bold; color: #666; display: block; margin-bottom: 4px; }
-        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+        label { font-size: 11px; font-weight: bold; color: #555; display: block; }
+        input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { background: #2196F3; color: white; border: none; padding: 12px; font-size: 16px; border-radius: 4px; font-weight: bold; }
         
-        button { 
-            background: #007bff; color: white; border: none; padding: 12px; 
-            font-size: 16px; border-radius: 8px; font-weight: bold;
-        }
-
         #viewer-container { flex-grow: 1; position: relative; background: #eee; }
         model-viewer { width: 100%; height: 100%; }
 
-        /* Custom AR Button to ensure visibility */
-        .ar-button {
-            background-image: url(https://modelviewer.dev/shared-assets/icons/ic_view_in_ar_new_googblue_48dp.png);
-            background-repeat: no-repeat;
-            background-size: 20px 20px;
-            background-position: 12px 50%;
-            background-color: #fff;
-            position: absolute;
-            left: 50%;
-            transform: translateX(-50%);
-            bottom: 20px;
-            padding: 0px 16px 0px 40px;
-            font-family: Roboto, Regular, Helvetica, sans-serif;
-            font-size: 14px;
-            color: #4285f4;
-            height: 36px;
-            line-height: 36px;
-            border-radius: 18px;
-            border: 1px solid #DADCE0;
-            display: none; /* Hidden by default until AR is ready */
-            z-index: 100;
+        /* Custom AR Button */
+        #ar-button {
+            display: none; /* Hidden until model ready */
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: white; border: 1px solid #dadce0; border-radius: 30px;
+            padding: 10px 24px; font-weight: bold; color: #4285f4; box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+            align-items: center; gap: 8px;
         }
     </style>
-    
+
     <script type="importmap">
         {
             "imports": {
@@ -68,16 +47,25 @@
 </head>
 <body>
 
-    <div id="ar-status">Checking AR capability...</div>
+    <div id="error-screen">
+        <h1>⚠️ STOP!</h1>
+        <p>You opened this file directly (file://).</p>
+        <p>Browsers block 3D apps from running this way for security.</p>
+        <hr style="width: 50%; border: 1px solid #ffcdd2;">
+        <h3>The Fix:</h3>
+        <p>1. Go to <b>Netlify Drop</b> (search on Google).</p>
+        <p>2. Drag this file there.</p>
+        <p>3. Open the link they give you.</p>
+    </div>
 
     <div id="controls">
-        <div><label>Shelf Height (cm)</label><input type="number" id="hInput" value="80"></div>
-        <div><label>Shelf Width (cm)</label><input type="number" id="wInput" value="60"></div>
+        <div><label>Height (cm)</label><input type="number" id="hInput" value="80"></div>
+        <div><label>Width (cm)</label><input type="number" id="wInput" value="60"></div>
         <div class="full">
-            <label style="color:blue">Elevation from Floor (cm)</label>
+            <label style="color:blue">Elevation from floor (cm)</label>
             <input type="number" id="elInput" value="120">
         </div>
-        <button class="full" onclick="generateShelf()">Update 3D Model</button>
+        <button class="full" id="genBtn" onclick="generateShelf()">Update Model</button>
     </div>
 
     <div id="viewer-container">
@@ -91,88 +79,70 @@
             shadow-intensity="1" 
             auto-rotate>
             
-            <button slot="ar-button" class="ar-button" id="ar-btn">
-                View in your space
+            <button slot="ar-button" id="ar-button">
+                👋 View in your space
             </button>
         </model-viewer>
     </div>
 
     <script type="module">
+        // 1. CHECK IF USER OPENED IT WRONG
+        if (window.location.protocol === 'file:') {
+            document.getElementById('error-screen').style.display = 'flex';
+            document.getElementById('controls').style.display = 'none';
+            throw new Error("Execution stopped due to file protocol.");
+        }
+
         import * as THREE from 'three';
         import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 
-        const statusDiv = document.getElementById('ar-status');
-        const viewer = document.getElementById('shelf-viewer');
-        const arBtn = document.getElementById('ar-btn');
-
-        // 1. CHECK AR COMPATIBILITY IMMEDIATELY
-        function checkAR() {
-            const isSecure = window.isSecureContext;
-            const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
-            if (!isSecure) {
-                statusDiv.innerHTML = "⚠️ <b>AR BLOCKED:</b> Page is not Secure (HTTPS).<br>Upload to Netlify or use Localhost.";
-                statusDiv.style.background = "#ffcccb";
-                return;
-            }
-            
-            if (!isMobile) {
-                statusDiv.innerHTML = "ℹ️ <b>Desktop Detected:</b> AR only works on Mobile.";
-                return;
-            }
-
-            statusDiv.innerHTML = "✅ AR System Ready. Generating model...";
-            statusDiv.style.background = "#d4edda";
-        }
-
-        // 2. GENERATE MODEL
         window.generateShelf = function() {
+            const btn = document.getElementById('genBtn');
+            btn.innerText = "Generating...";
+            
+            // Setup Scene
             const scene = new THREE.Scene();
             const material = new THREE.MeshStandardMaterial({ color: 0x8B5A2B });
 
+            // Get inputs (divide by 100 for meters)
             const h = parseFloat(document.getElementById('hInput').value) / 100;
             const w = parseFloat(document.getElementById('wInput').value) / 100;
             const elevation = parseFloat(document.getElementById('elInput').value) / 100;
             const d = 0.3; 
             const thick = 0.02;
 
-            function addBox(bx, by, bz, x, y, z) {
+            function box(bx, by, bz, x, y, z) {
                 const geo = new THREE.BoxGeometry(bx, by, bz);
                 const mesh = new THREE.Mesh(geo, material);
+                // Shift Up by Elevation
                 mesh.position.set(x, y + elevation, z);
                 scene.add(mesh);
             }
 
             // Build Shelf
-            addBox(thick, h, d, -w/2 + thick/2, h/2, 0);
-            addBox(thick, h, d, w/2 - thick/2, h/2, 0);
-            addBox(w - thick*2, thick, d, 0, h - thick/2, 0);
-            addBox(w - thick*2, thick, d, 0, thick/2, 0);
-            addBox(w, h, 0.005, 0, h/2, -d/2);
+            box(thick, h, d, -w/2 + thick/2, h/2, 0); // Left
+            box(thick, h, d, w/2 - thick/2, h/2, 0);  // Right
+            box(w - thick*2, thick, d, 0, h - thick/2, 0); // Top
+            box(w - thick*2, thick, d, 0, thick/2, 0); // Bottom
+            box(w, h, 0.005, 0, h/2, -d/2); // Back
 
-            // Export
+            // Export to GLB
             const exporter = new GLTFExporter();
             exporter.parse(scene, function (result) {
                 const blob = new Blob([result], { type: 'application/octet-stream' });
                 const url = URL.createObjectURL(blob);
                 
+                const viewer = document.getElementById('shelf-viewer');
                 viewer.src = url;
                 
-                // FORCE SHOW AR BUTTON ONCE MODEL IS LOADED
-                setTimeout(() => {
-                    if (viewer.canActivateAR) {
-                        arBtn.style.display = 'block';
-                        statusDiv.innerHTML = "✅ AR Ready. Tap 'View in your space'";
-                    } else {
-                        statusDiv.innerHTML = "⚠️ Model loaded, but browser says AR unavailable.";
-                    }
-                }, 1000);
-
+                // Show AR Button manually
+                document.getElementById('ar-button').style.display = 'flex';
+                btn.innerText = "Update Model";
+                
             }, { binary: true });
         };
 
-        checkAR();
-        // Delay generation slightly to ensure Three.js is parsed
+        // Run once on load
         setTimeout(generateShelf, 1000);
     </script>
 </body>
